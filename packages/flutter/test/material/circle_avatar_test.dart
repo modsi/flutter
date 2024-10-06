@@ -12,7 +12,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-
 import '../image_data.dart';
 import '../painting/mocks_for_image_cache.dart';
 
@@ -96,6 +95,7 @@ void main() {
   });
 
   testWidgets('CircleAvatar backgroundImage is used as a fallback for foregroundImage', (WidgetTester tester) async {
+    addTearDown(imageCache.clear);
     final ErrorImageProvider errorImage = ErrorImageProvider();
     bool caughtForegroundImageError = false;
     await tester.pumpWidget(
@@ -146,8 +146,8 @@ void main() {
     expect(paragraph.text.style!.color, equals(foregroundColor));
   });
 
-  testWidgets('CircleAvatar default colors', (WidgetTester tester) async {
-    final ThemeData theme = ThemeData(useMaterial3: true);
+  testWidgets('Material3 - CircleAvatar default colors', (WidgetTester tester) async {
+    final ThemeData theme = ThemeData();
     await tester.pumpWidget(
       wrap(
         child: Theme(
@@ -168,7 +168,7 @@ void main() {
     expect(paragraph.text.style!.color, equals(theme.colorScheme.onPrimaryContainer));
   });
 
-  testWidgets('CircleAvatar text does not expand with textScaleFactor', (WidgetTester tester) async {
+  testWidgets('CircleAvatar text does not expand with textScaler', (WidgetTester tester) async {
     final Color foregroundColor = Colors.red.shade100;
     await tester.pumpWidget(
       wrap(
@@ -185,7 +185,7 @@ void main() {
       wrap(
         child: MediaQuery(
           data: const MediaQueryData(
-            textScaleFactor: 2.0,
+            textScaler: TextScaler.linear(2.0),
             size: Size(111.0, 111.0),
             devicePixelRatio: 1.1,
             padding: EdgeInsets.all(11.0),
@@ -201,7 +201,7 @@ void main() {
                 expect(data.padding, equals(const EdgeInsets.all(11.0)));
 
                 // This should be overridden to 1.0.
-                expect(data.textScaleFactor, equals(1.0));
+                expect(data.textScaler, TextScaler.noScaling);
                 return const Text('Z');
               },
             ),
@@ -286,7 +286,7 @@ void main() {
     // support is deprecated and the APIs are removed, these tests
     // can be deleted.
 
-    testWidgets('CircleAvatar default colors with light theme', (WidgetTester tester) async {
+    testWidgets('Material2 - CircleAvatar default colors with light theme', (WidgetTester tester) async {
       final ThemeData theme = ThemeData(useMaterial3: false, primaryColor: Colors.grey.shade100);
       await tester.pumpWidget(
         wrap(
@@ -308,7 +308,7 @@ void main() {
       expect(paragraph.text.style!.color, equals(theme.primaryTextTheme.titleLarge!.color));
     });
 
-    testWidgets('CircleAvatar default colors with dark theme', (WidgetTester tester) async {
+    testWidgets('Material2 - CircleAvatar default colors with dark theme', (WidgetTester tester) async {
       final ThemeData theme = ThemeData(useMaterial3: false, primaryColor: Colors.grey.shade800);
       await tester.pumpWidget(
         wrap(

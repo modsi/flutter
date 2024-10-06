@@ -35,7 +35,11 @@ Future<void> updateGeneratedXcodeProperties({
   String? targetOverride,
   bool useMacOSConfig = false,
   String? buildDirOverride,
+<<<<<<< HEAD
   bool usingCoreDevice = false,
+=======
+  String? configurationBuildDir,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
 }) async {
   final List<String> xcodeBuildSettings = await _xcodeBuildSettingsLines(
     project: project,
@@ -43,7 +47,11 @@ Future<void> updateGeneratedXcodeProperties({
     targetOverride: targetOverride,
     useMacOSConfig: useMacOSConfig,
     buildDirOverride: buildDirOverride,
+<<<<<<< HEAD
     usingCoreDevice: usingCoreDevice,
+=======
+    configurationBuildDir: configurationBuildDir,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
   );
 
   _updateGeneratedXcodePropertiesFile(
@@ -145,7 +153,11 @@ Future<List<String>> _xcodeBuildSettingsLines({
   String? targetOverride,
   bool useMacOSConfig = false,
   String? buildDirOverride,
+<<<<<<< HEAD
   bool usingCoreDevice = false,
+=======
+  String? configurationBuildDir,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
 }) async {
   final List<String> xcodeBuildSettings = <String>[];
 
@@ -174,18 +186,28 @@ Future<List<String>> _xcodeBuildSettingsLines({
   xcodeBuildSettings.add('FLUTTER_BUILD_NUMBER=$buildNumber');
 
   // CoreDevices in debug and profile mode are launched, but not built, via Xcode.
+<<<<<<< HEAD
   // Set the BUILD_DIR so Xcode knows where to find the app bundle to launch.
   if (usingCoreDevice && !buildInfo.isRelease) {
     xcodeBuildSettings.add('BUILD_DIR=${globals.fs.path.absolute(getIosBuildDirectory())}');
+=======
+  // Set the CONFIGURATION_BUILD_DIR so Xcode knows where to find the app
+  // bundle to launch.
+  if (configurationBuildDir != null) {
+    xcodeBuildSettings.add('CONFIGURATION_BUILD_DIR=$configurationBuildDir');
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
   }
 
   final LocalEngineInfo? localEngineInfo = globals.artifacts?.localEngineInfo;
   if (localEngineInfo != null) {
-    final String engineOutPath = localEngineInfo.engineOutPath;
+    final String engineOutPath = localEngineInfo.targetOutPath;
     xcodeBuildSettings.add('FLUTTER_ENGINE=${globals.fs.path.dirname(globals.fs.path.dirname(engineOutPath))}');
 
-    final String localEngineName = localEngineInfo.localEngineName;
+    final String localEngineName = localEngineInfo.localTargetName;
     xcodeBuildSettings.add('LOCAL_ENGINE=$localEngineName');
+
+    final String localEngineHostName = localEngineInfo.localHostName;
+    xcodeBuildSettings.add('LOCAL_ENGINE_HOST=$localEngineHostName');
 
     // Tell Xcode not to build universal binaries for local engines, which are
     // single-architecture.

@@ -11,6 +11,10 @@ import 'l10n/generated_material_localizations.dart';
 import 'utils/date_localizations.dart' as util;
 import 'widgets_localizations.dart';
 
+// Examples can assume:
+// import 'package:flutter_localizations/flutter_localizations.dart';
+// import 'package:flutter/material.dart';
+
 /// Implementation of localized strings for the material widgets using the
 /// `intl` package for date and time formatting.
 ///
@@ -30,11 +34,11 @@ import 'widgets_localizations.dart';
 /// app supports with [MaterialApp.supportedLocales]:
 ///
 /// ```dart
-/// MaterialApp(
+/// const MaterialApp(
 ///   localizationsDelegates: GlobalMaterialLocalizations.delegates,
-///   supportedLocales: [
-///     const Locale('en', 'US'), // American English
-///     const Locale('he', 'IL'), // Israeli Hebrew
+///   supportedLocales: <Locale>[
+///     Locale('en', 'US'), // American English
+///     Locale('he', 'IL'), // Israeli Hebrew
 ///     // ...
 ///   ],
 ///   // ...
@@ -60,7 +64,7 @@ import 'widgets_localizations.dart';
 /// See also:
 ///
 ///  * The Flutter Internationalization Tutorial,
-///    <https://flutter.dev/tutorials/internationalization/>.
+///    <https://flutter.dev/to/internationalization/>.
 ///  * [DefaultMaterialLocalizations], which only provides US English translations.
 abstract class GlobalMaterialLocalizations implements MaterialLocalizations {
   /// Initializes an object that defines the material widgets' localized strings
@@ -222,12 +226,10 @@ abstract class GlobalMaterialLocalizations implements MaterialLocalizations {
   }
 
   String? _formatDayPeriod(TimeOfDay timeOfDay) {
-    switch (timeOfDay.period) {
-      case DayPeriod.am:
-        return anteMeridiemAbbreviation;
-      case DayPeriod.pm:
-        return postMeridiemAbbreviation;
-    }
+    return switch (timeOfDay.period) {
+      DayPeriod.am => anteMeridiemAbbreviation,
+      DayPeriod.pm => postMeridiemAbbreviation,
+    };
   }
 
   /// The raw version of [dateRangeStartDateSemanticLabel], with `$formattedDate` verbatim
@@ -681,11 +683,11 @@ abstract class GlobalMaterialLocalizations implements MaterialLocalizations {
   /// app supports with [MaterialApp.supportedLocales]:
   ///
   /// ```dart
-  /// MaterialApp(
+  /// const MaterialApp(
   ///   localizationsDelegates: GlobalMaterialLocalizations.delegates,
-  ///   supportedLocales: [
-  ///     const Locale('en', 'US'), // English
-  ///     const Locale('he', 'IL'), // Hebrew
+  ///   supportedLocales: <Locale>[
+  ///     Locale('en', 'US'), // English
+  ///     Locale('he', 'IL'), // Hebrew
   ///   ],
   ///   // ...
   /// )

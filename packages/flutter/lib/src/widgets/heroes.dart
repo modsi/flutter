@@ -73,7 +73,7 @@ enum HeroFlightDirection {
 }
 
 /// A widget that marks its child as being a candidate for
-/// [hero animations](https://flutter.dev/docs/development/ui/animations/hero-animations).
+/// [hero animations](https://docs.flutter.dev/ui/animations/hero-animations).
 ///
 /// When a [PageRoute] is pushed or popped with the [Navigator], the entire
 /// screen's content is replaced. An old route disappears and a new route
@@ -170,7 +170,6 @@ enum HeroFlightDirection {
 class Hero extends StatefulWidget {
   /// Create a hero.
   ///
-  /// The [tag] and [child] parameters must not be null.
   /// The [child] parameter and all of the its descendants must not be [Hero]es.
   const Hero({
     super.key,
@@ -259,7 +258,7 @@ class Hero extends StatefulWidget {
   /// [PageRoute.maintainState] set to true for a gesture triggered hero
   /// transition to work.
   ///
-  /// Defaults to false and cannot be null.
+  /// Defaults to false.
   final bool transitionOnUserGestures;
 
   // Returns a map of all of the heroes in `context` indexed by hero tag that
@@ -426,7 +425,6 @@ class _HeroState extends State<Hero> {
 }
 
 // Everything known about a hero flight that's to be started or diverted.
-@immutable
 class _HeroFlightManifest {
   _HeroFlightManifest({
     required this.type,
@@ -456,8 +454,10 @@ class _HeroFlightManifest {
 
   Object get tag => fromHero.widget.tag;
 
+  CurvedAnimation? _animation;
+
   Animation<double> get animation {
-    return CurvedAnimation(
+    return _animation ??= CurvedAnimation(
       parent: (type == HeroFlightDirection.push) ? toRoute.animation! : fromRoute.animation!,
       curve: Curves.fastOutSlowIn,
       reverseCurve: isDiverted ? null : Curves.fastOutSlowIn.flipped,
@@ -506,11 +506,25 @@ class _HeroFlightManifest {
     return '_HeroFlightManifest($type tag: $tag from route: ${fromRoute.settings} '
         'to route: ${toRoute.settings} with hero: $fromHero to $toHero)${isValid ? '' : ', INVALID'}';
   }
+
+  @mustCallSuper
+  void dispose() {
+    _animation?.dispose();
+  }
 }
 
 // Builds the in-flight hero widget.
 class _HeroFlight {
   _HeroFlight(this.onFlightEnded) {
+    // TODO(polina-c): stop duplicating code across disposables
+    // https://github.com/flutter/flutter/issues/137435
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectCreated(
+        library: 'package:flutter/widgets.dart',
+        className: '$_HeroFlight',
+        object: this,
+      );
+    }
     _proxyAnimation = ProxyAnimation()..addStatusListener(_handleAnimationUpdate);
   }
 
@@ -523,7 +537,13 @@ class _HeroFlight {
   late ProxyAnimation _proxyAnimation;
   // The manifest will be available once `start` is called, throughout the
   // flight's lifecycle.
-  late _HeroFlightManifest manifest;
+  _HeroFlightManifest? _manifest;
+  _HeroFlightManifest get manifest => _manifest!;
+  set manifest (_HeroFlightManifest value) {
+    _manifest?.dispose();
+    _manifest = value;
+  }
+
   OverlayEntry? overlayEntry;
   bool _aborted = false;
 
@@ -563,19 +583,20 @@ class _HeroFlight {
   }
 
   void _performAnimationUpdate(AnimationStatus status) {
-    if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+    if (!status.isAnimating) {
       _proxyAnimation.parent = null;
 
       assert(overlayEntry != null);
       overlayEntry!.remove();
+      overlayEntry!.dispose();
       overlayEntry = null;
       // We want to keep the hero underneath the current page hidden. If
       // [AnimationStatus.completed], toHero will be the one on top and we keep
       // fromHero hidden. If [AnimationStatus.dismissed], the animation is
       // triggered but canceled before it finishes. In this case, we keep toHero
       // hidden instead.
-      manifest.fromHero.endFlight(keepPlaceholder: status == AnimationStatus.completed);
-      manifest.toHero.endFlight(keepPlaceholder: status == AnimationStatus.dismissed);
+      manifest.fromHero.endFlight(keepPlaceholder: status.isCompleted);
+      manifest.toHero.endFlight(keepPlaceholder: status.isDismissed);
       onFlightEnded(this);
       _proxyAnimation.removeListener(onTick);
     }
@@ -609,6 +630,23 @@ class _HeroFlight {
     assert(navigator.userGestureInProgress);
     _scheduledPerformAnimationUpdate = true;
     navigator.userGestureInProgressNotifier.addListener(delayedPerformAnimationUpdate);
+  }
+
+  /// Releases resources.
+  @mustCallSuper
+  void dispose() {
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectDisposed(object: this);
+    }
+    if (overlayEntry != null) {
+      overlayEntry!.remove();
+      overlayEntry!.dispose();
+      overlayEntry = null;
+      _proxyAnimation.parent = null;
+      _proxyAnimation.removeListener(onTick);
+      _proxyAnimation.removeStatusListener(_handleAnimationUpdate);
+    }
+    _manifest?.dispose();
   }
 
   void onTick() {
@@ -771,7 +809,17 @@ class HeroController extends NavigatorObserver {
   ///
   /// The [createRectTween] argument is optional. If null, the controller uses a
   /// linear [Tween<Rect>].
-  HeroController({ this.createRectTween });
+  HeroController({ this.createRectTween }) {
+    // TODO(polina-c): stop duplicating code across disposables
+    // https://github.com/flutter/flutter/issues/137435
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectCreated(
+        library: 'package:flutter/widgets.dart',
+        className: '$HeroController',
+        object: this,
+      );
+    }
+  }
 
   /// Used to create [RectTween]s that interpolate the position of heroes in flight.
   ///
@@ -889,7 +937,7 @@ class HeroController extends NavigatorObserver {
           return;
         }
         _startHeroTransition(from, to, flightType, isUserGestureTransition);
-      });
+      }, debugLabel: 'HeroController.startTransition');
     }
   }
 
@@ -985,7 +1033,7 @@ class HeroController extends NavigatorObserver {
   }
 
   void _handleFlightEnded(_HeroFlight flight) {
-    _flights.remove(flight.manifest.tag);
+    _flights.remove(flight.manifest.tag)?.dispose();
   }
 
   Widget _defaultHeroFlightShuttleBuilder(
@@ -1026,6 +1074,20 @@ class HeroController extends NavigatorObserver {
       },
     );
   }
+
+  /// Releases resources.
+  @mustCallSuper
+  void dispose() {
+    // TODO(polina-c): stop duplicating code across disposables
+    // https://github.com/flutter/flutter/issues/137435
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectDisposed(object: this);
+    }
+
+    for (final _HeroFlight flight in _flights.values) {
+      flight.dispose();
+    }
+  }
 }
 
 /// Enables or disables [Hero]es in the widget subtree.
@@ -1039,8 +1101,6 @@ class HeroController extends NavigatorObserver {
 /// hero animations, as usual.
 class HeroMode extends StatelessWidget {
   /// Creates a widget that enables or disables [Hero]es.
-  ///
-  /// The [child] and [enabled] arguments must not be null.
   const HeroMode({
     super.key,
     required this.child,
@@ -1055,7 +1115,7 @@ class HeroMode extends StatelessWidget {
   /// If this property is false, the [Hero]es in this subtree will not animate
   /// on route changes. Otherwise, they will animate as usual.
   ///
-  /// Defaults to true and must not be null.
+  /// Defaults to true.
   final bool enabled;
 
   @override

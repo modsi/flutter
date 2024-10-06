@@ -4,6 +4,7 @@
 
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:file/memory.dart';
 import 'package:flutter_tools/src/application_package.dart';
 import 'package:flutter_tools/src/base/file_system.dart';
@@ -14,12 +15,13 @@ import 'package:flutter_tools/src/desktop_device.dart';
 import 'package:flutter_tools/src/devfs.dart';
 import 'package:flutter_tools/src/device.dart';
 import 'package:flutter_tools/src/device_port_forwarder.dart';
+import 'package:flutter_tools/src/macos/macos_device.dart';
 import 'package:flutter_tools/src/project.dart';
 
 import 'package:test/fake.dart';
 
 import '../src/common.dart';
-import '../src/fake_process_manager.dart';
+import '../src/context.dart';
 
 void main() {
   group('Basic info', () {
@@ -151,18 +153,20 @@ void main() {
           'FLUTTER_ENGINE_SWITCH_6': 'trace-allowlist=foo,bar',
           'FLUTTER_ENGINE_SWITCH_7': 'trace-skia-allowlist=skia.a,skia.b',
           'FLUTTER_ENGINE_SWITCH_8': 'trace-systrace=true',
-          'FLUTTER_ENGINE_SWITCH_9': 'endless-trace-buffer=true',
-          'FLUTTER_ENGINE_SWITCH_10': 'dump-skp-on-shader-compilation=true',
-          'FLUTTER_ENGINE_SWITCH_11': 'cache-sksl=true',
-          'FLUTTER_ENGINE_SWITCH_12': 'purge-persistent-cache=true',
-          'FLUTTER_ENGINE_SWITCH_13': 'enable-checked-mode=true',
-          'FLUTTER_ENGINE_SWITCH_14': 'verify-entry-points=true',
-          'FLUTTER_ENGINE_SWITCH_15': 'start-paused=true',
-          'FLUTTER_ENGINE_SWITCH_16': 'disable-service-auth-codes=true',
-          'FLUTTER_ENGINE_SWITCH_17': 'dart-flags=--null_assertions',
-          'FLUTTER_ENGINE_SWITCH_18': 'use-test-fonts=true',
-          'FLUTTER_ENGINE_SWITCH_19': 'verbose-logging=true',
-          'FLUTTER_ENGINE_SWITCHES': '19',
+          'FLUTTER_ENGINE_SWITCH_9': 'trace-to-file=path/to/trace.binpb',
+          'FLUTTER_ENGINE_SWITCH_10': 'endless-trace-buffer=true',
+          'FLUTTER_ENGINE_SWITCH_11': 'dump-skp-on-shader-compilation=true',
+          'FLUTTER_ENGINE_SWITCH_12': 'cache-sksl=true',
+          'FLUTTER_ENGINE_SWITCH_13': 'purge-persistent-cache=true',
+          'FLUTTER_ENGINE_SWITCH_14': 'enable-impeller=false',
+          'FLUTTER_ENGINE_SWITCH_15': 'enable-checked-mode=true',
+          'FLUTTER_ENGINE_SWITCH_16': 'verify-entry-points=true',
+          'FLUTTER_ENGINE_SWITCH_17': 'start-paused=true',
+          'FLUTTER_ENGINE_SWITCH_18': 'disable-service-auth-codes=true',
+          'FLUTTER_ENGINE_SWITCH_19': 'dart-flags=--null_assertions',
+          'FLUTTER_ENGINE_SWITCH_20': 'use-test-fonts=true',
+          'FLUTTER_ENGINE_SWITCH_21': 'verbose-logging=true',
+          'FLUTTER_ENGINE_SWITCHES': '21',
         }
       ),
     ]);
@@ -184,6 +188,7 @@ void main() {
         traceAllowlist: 'foo,bar',
         traceSkiaAllowlist: 'skia.a,skia.b',
         traceSystrace: true,
+        traceToFile: 'path/to/trace.binpb',
         endlessTraceBuffer: true,
         dumpSkpOnShaderCompilation: true,
         cacheSkSL: true,
@@ -209,7 +214,8 @@ void main() {
           'FLUTTER_ENGINE_SWITCH_2': 'trace-startup=true',
           'FLUTTER_ENGINE_SWITCH_3': 'trace-allowlist=foo,bar',
           'FLUTTER_ENGINE_SWITCH_4': 'cache-sksl=true',
-          'FLUTTER_ENGINE_SWITCHES': '4',
+          'FLUTTER_ENGINE_SWITCH_5': 'enable-impeller=false',
+          'FLUTTER_ENGINE_SWITCHES': '5',
         }
       ),
     ]);
@@ -301,7 +307,7 @@ void main() {
     );
   });
 
-  testWithoutContext('Desktop devices that support impeller pass through the enable-impeller flag', () async {
+  testWithoutContext('Desktop devices pass through the enable-impeller flag', () async {
     final FakeProcessManager processManager = FakeProcessManager.list(<FakeCommand>[
       const FakeCommand(
         command: <String>['debug'],
@@ -317,7 +323,6 @@ void main() {
     ]);
     final FakeDesktopDevice device = setUpDesktopDevice(
       processManager: processManager,
-      supportsImpeller: true,
     );
 
     final FakeApplicationPackage package = FakeApplicationPackage();
@@ -332,16 +337,17 @@ void main() {
     );
   });
 
-  testWithoutContext('Desktop devices that do not support impeller ignore the enable-impeller flag', () async {
+  testWithoutContext('Desktop devices pass through the --no-enable-impeller flag', () async {
     final FakeProcessManager processManager = FakeProcessManager.list(<FakeCommand>[
       const FakeCommand(
         command: <String>['debug'],
         exitCode: -1,
         environment: <String, String>{
           'FLUTTER_ENGINE_SWITCH_1': 'enable-dart-profiling=true',
-          'FLUTTER_ENGINE_SWITCH_2': 'enable-checked-mode=true',
-          'FLUTTER_ENGINE_SWITCH_3': 'verify-entry-points=true',
-          'FLUTTER_ENGINE_SWITCHES': '3'
+          'FLUTTER_ENGINE_SWITCH_2': 'enable-impeller=false',
+          'FLUTTER_ENGINE_SWITCH_3': 'enable-checked-mode=true',
+          'FLUTTER_ENGINE_SWITCH_4': 'verify-entry-points=true',
+          'FLUTTER_ENGINE_SWITCHES': '4'
         }
       ),
     ]);
@@ -355,10 +361,37 @@ void main() {
       prebuiltApplication: true,
       debuggingOptions: DebuggingOptions.enabled(
         BuildInfo.debug,
-        enableImpeller: ImpellerStatus.enabled,
+        enableImpeller: ImpellerStatus.disabled,
         dartEntrypointArgs: <String>[],
       ),
     );
+  });
+
+  testUsingContext('macOS devices print warning if Dart VM not found within timeframe in CI', () async {
+    final BufferLogger logger = BufferLogger.test();
+    final FakeMacOSDevice device = FakeMacOSDevice(
+      fileSystem: MemoryFileSystem.test(),
+      processManager: FakeProcessManager.any(),
+      operatingSystemUtils: FakeOperatingSystemUtils(),
+      logger: logger,
+    );
+
+    final FakeApplicationPackage package = FakeApplicationPackage();
+
+    FakeAsync().run((FakeAsync fakeAsync) {
+      device.startApp(
+        package,
+        prebuiltApplication: true,
+        debuggingOptions: DebuggingOptions.enabled(
+          BuildInfo.debug,
+          enableImpeller: ImpellerStatus.disabled,
+          dartEntrypointArgs: <String>[],
+          usingCISystem: true,
+        ),
+      );
+      fakeAsync.flushTimers();
+      expect(logger.errorText, contains('Ensure sandboxing is disabled by checking the set CODE_SIGN_ENTITLEMENTS'));
+    });
   });
 }
 
@@ -368,7 +401,6 @@ FakeDesktopDevice setUpDesktopDevice({
   ProcessManager? processManager,
   OperatingSystemUtils? operatingSystemUtils,
   bool nullExecutablePathForDevice = false,
-  bool supportsImpeller = false,
 }) {
   return FakeDesktopDevice(
     fileSystem: fileSystem ?? MemoryFileSystem.test(),
@@ -376,7 +408,6 @@ FakeDesktopDevice setUpDesktopDevice({
     processManager: processManager ?? FakeProcessManager.any(),
     operatingSystemUtils: operatingSystemUtils ?? FakeOperatingSystemUtils(),
     nullExecutablePathForDevice: nullExecutablePathForDevice,
-    supportsImpeller: supportsImpeller,
   );
 }
 
@@ -388,7 +419,6 @@ class FakeDesktopDevice extends DesktopDevice {
     required FileSystem fileSystem,
     required OperatingSystemUtils operatingSystemUtils,
     this.nullExecutablePathForDevice = false,
-    this.supportsImpeller = false,
   }) : super(
       'dummy',
       platformType: PlatformType.linux,
@@ -408,9 +438,6 @@ class FakeDesktopDevice extends DesktopDevice {
   final bool nullExecutablePathForDevice;
 
   @override
-  final bool supportsImpeller;
-
-  @override
   String get name => 'dummy';
 
   @override
@@ -426,6 +453,7 @@ class FakeDesktopDevice extends DesktopDevice {
   Future<void> buildForDevice({
     String? mainPath,
     BuildInfo? buildInfo,
+    bool usingCISystem = false,
   }) async {
     lastBuiltMainPath = mainPath;
     lastBuildInfo = buildInfo;
@@ -445,4 +473,39 @@ class FakeApplicationPackage extends Fake implements ApplicationPackage { }
 class FakeOperatingSystemUtils extends Fake implements OperatingSystemUtils {
   @override
   String get name => 'Example';
+}
+
+class FakeMacOSDevice extends MacOSDevice {
+  FakeMacOSDevice({
+    required super.processManager,
+    required super.logger,
+    required super.fileSystem,
+    required super.operatingSystemUtils,
+  });
+
+  @override
+  String get name => 'dummy';
+
+  @override
+  Future<TargetPlatform> get targetPlatform async => TargetPlatform.tester;
+
+  @override
+  bool isSupported() => true;
+
+  @override
+  bool isSupportedForProject(FlutterProject flutterProject) => true;
+
+  @override
+  Future<void> buildForDevice({
+    String? mainPath,
+    BuildInfo? buildInfo,
+    bool usingCISystem = false,
+  }) async {
+  }
+
+  // Dummy implementation that just returns the build mode name.
+  @override
+  String? executablePathForDevice(ApplicationPackage package, BuildInfo buildInfo) {
+    return buildInfo.mode.cliName;
+  }
 }

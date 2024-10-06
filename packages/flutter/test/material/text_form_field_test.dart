@@ -11,8 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import '../rendering/mock_canvas.dart';
 import '../widgets/clipboard_utils.dart';
 import '../widgets/editable_text_utils.dart';
 
@@ -31,6 +29,7 @@ void main() {
     final TextEditingController controller = TextEditingController(
       text: 'blah1 blah2',
     );
+    addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Material(
@@ -107,6 +106,7 @@ void main() {
     final TextEditingController controller = TextEditingController(
       text: 'blah1 blah2',
     );
+    addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Material(
@@ -249,10 +249,40 @@ void main() {
     skip: kIsWeb, // [intended] we don't supply the cut/copy/paste buttons on the web.
   );
 
+  testWidgets(
+    '$SelectionOverlay is not leaking',
+    (WidgetTester tester) async {
+    final TextEditingController controller = TextEditingController(
+      text: 'blah1 blah2',
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Material(
+          child: Center(
+            child: TextField(
+              controller: controller,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final Offset startBlah1 = textOffsetToPosition(tester, 0);
+    await tester.tapAt(startBlah1);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tapAt(startBlah1);
+    await tester.pumpAndSettle();
+    await tester.pump();
+  },
+    skip: kIsWeb, // [intended] we don't supply the cut/copy/paste buttons on the web.
+  );
+
   testWidgets('the desktop cut/copy/paste buttons are disabled for read-only obscured form fields', (WidgetTester tester) async {
     final TextEditingController controller = TextEditingController(
       text: 'blah1 blah2',
     );
+    addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Material(
@@ -297,6 +327,7 @@ void main() {
     final TextEditingController controller = TextEditingController(
       text: 'blah1 blah2',
     );
+    addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Material(
@@ -741,6 +772,7 @@ void main() {
               children: <Widget>[
                 const Text('Outside'),
                 TextFormField(
+                  autofocus: true,
                   onTapOutside: (PointerEvent event) {
                     tapOutsideCount += 1;
                   },
@@ -761,6 +793,123 @@ void main() {
     expect(tapOutsideCount, 3);
   });
 
+  // Regression test for https://github.com/flutter/flutter/issues/134341.
+  testWidgets('onTapOutside is not called upon tap outside when field is not focused', (WidgetTester tester) async {
+    int tapOutsideCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Material(
+          child: Center(
+            child: Column(
+              children: <Widget>[
+                const Text('Outside'),
+                TextFormField(
+                  onTapOutside: (PointerEvent event) {
+                    tapOutsideCount += 1;
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(tapOutsideCount, 0);
+    await tester.tap(find.byType(TextFormField));
+    await tester.tap(find.text('Outside'));
+    await tester.tap(find.text('Outside'));
+    await tester.tap(find.text('Outside'));
+    expect(tapOutsideCount, 0);
+  });
+
+  // Regression test for https://github.com/flutter/flutter/issues/127597.
+  testWidgets(
+    'The second TextFormField is clicked, triggers the onTapOutside callback of the previous TextFormField',
+        (WidgetTester tester) async {
+      final GlobalKey keyA = GlobalKey();
+      final GlobalKey keyB = GlobalKey();
+      final GlobalKey keyC = GlobalKey();
+      bool outsideClickA = false;
+      bool outsideClickB = false;
+      bool outsideClickC = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Align(
+            alignment: Alignment.topLeft,
+            child: Column(
+              children: <Widget>[
+                const Text('Outside'),
+                Material(
+                  child: TextFormField(
+                    key: keyA,
+                    groupId: 'Group A',
+                    onTapOutside: (PointerDownEvent event) {
+                      outsideClickA = true;
+                    },
+                  ),
+                ),
+                Material(
+                  child: TextFormField(
+                    key: keyB,
+                    groupId: 'Group B',
+                    onTapOutside: (PointerDownEvent event) {
+                      outsideClickB = true;
+                    },
+                  ),
+                ),
+                Material(
+                  child: TextFormField(
+                    key: keyC,
+                    groupId: 'Group C',
+                    onTapOutside: (PointerDownEvent event) {
+                      outsideClickC = true;
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      await tester.pump();
+
+      Future<void> click(Finder finder) async {
+        await tester.tap(finder);
+        await tester.enterText(finder, 'Hello');
+        await tester.pump();
+      }
+
+      expect(outsideClickA, false);
+      expect(outsideClickB, false);
+      expect(outsideClickC, false);
+
+      await click(find.byKey(keyA));
+      await tester.showKeyboard(find.byKey(keyA));
+      await tester.idle();
+      expect(outsideClickA, false);
+      expect(outsideClickB, false);
+      expect(outsideClickC, false);
+
+      await click(find.byKey(keyB));
+      expect(outsideClickA, true);
+      expect(outsideClickB, false);
+      expect(outsideClickC, false);
+
+      await click(find.byKey(keyC));
+      expect(outsideClickA, true);
+      expect(outsideClickB, true);
+      expect(outsideClickC, false);
+
+      await tester.tap(find.text('Outside'));
+      expect(outsideClickA, true);
+      expect(outsideClickB, true);
+      expect(outsideClickC, true);
+    },
+  );
+
   // Regression test for https://github.com/flutter/flutter/issues/54472.
   testWidgets('reset resets the text fields value to the initialValue', (WidgetTester tester) async {
     await tester.pumpWidget(
@@ -769,6 +918,31 @@ void main() {
           child: Center(
             child: TextFormField(
               initialValue: 'initialValue',
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextFormField), 'changedValue');
+
+    final FormFieldState<String> state = tester.state<FormFieldState<String>>(find.byType(TextFormField));
+    state.reset();
+
+    expect(find.text('changedValue'), findsNothing);
+    expect(find.text('initialValue'), findsOneWidget);
+  });
+
+  testWidgets('reset resets the text fields value to the controller initial value', (WidgetTester tester) async {
+    final TextEditingController controller = TextEditingController(text: 'initialValue');
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Material(
+          child: Center(
+            child: TextFormField(
+              controller: controller,
             ),
           ),
         ),
@@ -983,6 +1157,7 @@ void main() {
 
   testWidgets('Passes scrollController to underlying TextField', (WidgetTester tester) async {
     final ScrollController scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -1071,6 +1246,7 @@ void main() {
     final TextEditingController controller = TextEditingController(
       text: 'blah1 blah2',
     );
+    addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Material(
@@ -1201,6 +1377,7 @@ void main() {
 
   testWidgets('Passes undoController to undoController TextField', (WidgetTester tester) async {
     final UndoHistoryController undoController = UndoHistoryController(value: UndoHistoryValue.empty);
+    addTearDown(undoController.dispose);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -1333,7 +1510,7 @@ void main() {
   });
 
   testWidgets('Passes onAppPrivateCommand to onAppPrivateCommand TextField', (WidgetTester tester) async {
-    void onAppPrivateCommand(String p0, Map<String, dynamic> p1) {}
+    void onAppPrivateCommand(String action, Map<String, dynamic> data) {}
 
     await tester.pumpWidget(
       MaterialApp(
@@ -1420,27 +1597,201 @@ void main() {
     expect(textFieldWidget.dragStartBehavior, dragStartBehavior);
   });
 
-  testWidgets('Error color for cursor while validating', (WidgetTester tester) async {
-    const Color errorColor = Color(0xff123456);
-    await tester.pumpWidget(MaterialApp(
-      theme: ThemeData(
-        colorScheme: const ColorScheme.light(error: errorColor),
+  testWidgets('Passes onTapAlwaysCalled to onTapAlwaysCalled TextField', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Material(
+          child: Center(
+            child: TextFormField(
+              onTapAlwaysCalled: true,
+            ),
+          ),
+        ),
       ),
-      home: Material(
-        child: Center(
+    );
+
+    final Finder textFieldFinder = find.byType(TextField);
+    expect(textFieldFinder, findsOneWidget);
+
+    final TextField textFieldWidget = tester.widget(textFieldFinder);
+    expect(textFieldWidget.onTapAlwaysCalled, isTrue);
+  });
+
+  testWidgets('Error color for cursor while validating', (WidgetTester tester) async {
+    const Color themeErrorColor = Color(0xff111111);
+    const Color errorStyleColor = Color(0xff777777);
+    const Color cursorErrorColor = Color(0xffbbbbbb);
+
+    Widget buildWidget({Color? errorStyleColor, Color? cursorErrorColor}) {
+      return MaterialApp(
+        theme: ThemeData(
+          colorScheme: const ColorScheme.light(error: themeErrorColor),
+        ),
+        home: Material(
+          child: Center(
+            child: TextFormField(
+              enabled: true,
+              autovalidateMode: AutovalidateMode.always,
+              decoration: InputDecoration(
+                errorStyle: TextStyle(
+                  color: errorStyleColor,
+                ),
+              ),
+              cursorErrorColor: cursorErrorColor,
+              validator: (String? value) {
+                return 'Please enter value';
+              },
+            ),
+          ),
+        ),
+      );
+    }
+
+    Future<void> runTest(Widget widget, {required Color expectedColor}) async {
+      await tester.pumpWidget(widget);
+      await tester.enterText(find.byType(TextField), 'a');
+      final EditableText textField = tester.widget(
+        find.byType(EditableText).first,
+      );
+      await tester.pump();
+      expect(textField.cursorColor, expectedColor);
+    }
+
+    await runTest(
+      buildWidget(),
+      expectedColor: themeErrorColor,
+    );
+    await runTest(
+      buildWidget(errorStyleColor: errorStyleColor),
+      expectedColor: errorStyleColor,
+    );
+    await runTest(
+      buildWidget(cursorErrorColor: cursorErrorColor),
+      expectedColor: cursorErrorColor,
+    );
+    await runTest(
+      buildWidget(
+        errorStyleColor: errorStyleColor,
+        cursorErrorColor: cursorErrorColor,
+      ),
+      expectedColor: cursorErrorColor,
+    );
+  });
+
+  testWidgets('TextFormField onChanged is called when the form is reset', (WidgetTester tester) async {
+    // Regression test for https://github.com/flutter/flutter/issues/123009.
+    final GlobalKey<FormFieldState<String>> stateKey = GlobalKey<FormFieldState<String>>();
+    final GlobalKey<FormState> formKey = GlobalKey<FormState>();
+    String value = 'initialValue';
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Form(
+          key: formKey,
           child: TextFormField(
-            enabled: true,
-            autovalidateMode: AutovalidateMode.always,
-            validator: (String? value) {
-              return 'Please enter value';
+            key: stateKey,
+            initialValue: value,
+            onChanged: (String newValue) {
+              value = newValue;
             },
           ),
         ),
       ),
     ));
-    await tester.enterText(find.byType(TextField), 'a');
-    final EditableText textField = tester.widget(find.byType(EditableText).first);
+
+    // Initial value is 'initialValue'.
+    expect(stateKey.currentState!.value, 'initialValue');
+    expect(value, 'initialValue');
+
+    // Change value to 'changedValue'.
+    await tester.enterText(find.byType(TextField), 'changedValue');
+    expect(stateKey.currentState!.value,'changedValue');
+    expect(value, 'changedValue');
+
+    // Should be back to 'initialValue' when the form is reset.
+    formKey.currentState!.reset();
     await tester.pump();
-    expect(textField.cursorColor, errorColor);
+    expect(stateKey.currentState!.value,'initialValue');
+    expect(value, 'initialValue');
+  });
+
+  testWidgets(
+    'isValid returns false when forceErrorText is set and will change error display',
+    (WidgetTester tester) async {
+      final GlobalKey<FormFieldState<String>> fieldKey1 = GlobalKey<FormFieldState<String>>();
+      final GlobalKey<FormFieldState<String>> fieldKey2 = GlobalKey<FormFieldState<String>>();
+      const String forceErrorText = 'Forcing error.';
+      const String validString = 'Valid string';
+      String? validator(String? s) => s == validString ? null : 'Error text';
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(),
+            child: Directionality(
+              textDirection: TextDirection.ltr,
+              child: Center(
+                child: Material(
+                  child: Form(
+                    child: ListView(
+                      children: <Widget>[
+                        TextFormField(
+                          key: fieldKey1,
+                          initialValue: validString,
+                          validator: validator,
+                          autovalidateMode: AutovalidateMode.disabled,
+                        ),
+                        TextFormField(
+                          key: fieldKey2,
+                          initialValue: '',
+                          forceErrorText: forceErrorText,
+                          validator: validator,
+                          autovalidateMode: AutovalidateMode.disabled,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(fieldKey1.currentState!.isValid, isTrue);
+      expect(fieldKey1.currentState!.hasError, isFalse);
+      expect(fieldKey2.currentState!.isValid, isFalse);
+      expect(fieldKey2.currentState!.hasError, isTrue);
+  });
+
+  testWidgets('forceErrorText will override InputDecoration.error when both are provided', (WidgetTester tester) async {
+    const String forceErrorText = 'Forcing error';
+    const String decorationErrorText = 'Decoration';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(),
+          child: Directionality(
+            textDirection: TextDirection.ltr,
+            child: Center(
+              child: Material(
+                child: Form(
+                  child: TextFormField(
+                    forceErrorText: forceErrorText,
+                    decoration: const InputDecoration(
+                      errorText: decorationErrorText,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text(forceErrorText), findsOne);
+    expect(find.text(decorationErrorText), findsNothing);
   });
 }

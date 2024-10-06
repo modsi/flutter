@@ -22,10 +22,12 @@ import 'package:flutter_tools/src/ios/xcodeproj.dart';
 import 'package:flutter_tools/src/macos/xcdevice.dart';
 import 'package:flutter_tools/src/macos/xcode.dart';
 import 'package:test/fake.dart';
+import 'package:unified_analytics/unified_analytics.dart';
 
 import '../../src/common.dart';
 import '../../src/context.dart';
 import '../../src/fake_process_manager.dart';
+import '../../src/fakes.dart';
 
 void main() {
   late BufferLogger logger;
@@ -310,12 +312,12 @@ void main() {
           expect(xcode.isRecommendedVersionSatisfactory, isFalse);
         });
 
-        testWithoutContext('version checks pass when version meets minimum', () {
+        testWithoutContext('version checks pass when version meets minimum but not recommended', () {
           xcodeProjectInterpreter.isInstalled = true;
           xcodeProjectInterpreter.version = Version(14, null, null);
 
           expect(xcode.isRequiredVersionSatisfactory, isTrue);
-          expect(xcode.isRecommendedVersionSatisfactory, isTrue);
+          expect(xcode.isRecommendedVersionSatisfactory, isFalse);
         });
 
         testWithoutContext('version checks pass when major version exceeds minimum', () {
@@ -323,7 +325,6 @@ void main() {
           xcodeProjectInterpreter.version = Version(15, 0, 0);
 
           expect(xcode.isRequiredVersionSatisfactory, isTrue);
-          expect(xcode.isRecommendedVersionSatisfactory, isTrue);
         });
 
         testWithoutContext('version checks pass when minor version exceeds minimum', () {
@@ -331,12 +332,34 @@ void main() {
           xcodeProjectInterpreter.version = Version(14, 3, 0);
 
           expect(xcode.isRequiredVersionSatisfactory, isTrue);
-          expect(xcode.isRecommendedVersionSatisfactory, isTrue);
         });
 
         testWithoutContext('version checks pass when patch version exceeds minimum', () {
           xcodeProjectInterpreter.isInstalled = true;
           xcodeProjectInterpreter.version = Version(14, 0, 2);
+
+          expect(xcode.isRequiredVersionSatisfactory, isTrue);
+        });
+
+        testWithoutContext('version checks pass when major version exceeds recommendation', () {
+          xcodeProjectInterpreter.isInstalled = true;
+          xcodeProjectInterpreter.version = Version(16, 0, 0);
+
+          expect(xcode.isRequiredVersionSatisfactory, isTrue);
+          expect(xcode.isRecommendedVersionSatisfactory, isTrue);
+        });
+
+        testWithoutContext('version checks pass when minor version exceeds recommendation', () {
+          xcodeProjectInterpreter.isInstalled = true;
+          xcodeProjectInterpreter.version = Version(15, 3, 0);
+
+          expect(xcode.isRequiredVersionSatisfactory, isTrue);
+          expect(xcode.isRecommendedVersionSatisfactory, isTrue);
+        });
+
+        testWithoutContext('version checks pass when patch version exceeds recommendation', () {
+          xcodeProjectInterpreter.isInstalled = true;
+          xcodeProjectInterpreter.version = Version(15, 0, 2);
 
           expect(xcode.isRequiredVersionSatisfactory, isTrue);
           expect(xcode.isRecommendedVersionSatisfactory, isTrue);
@@ -515,6 +538,10 @@ void main() {
           fileSystem: fileSystem,
           coreDeviceControl: FakeIOSCoreDeviceControl(),
           xcodeDebug: FakeXcodeDebug(),
+<<<<<<< HEAD
+=======
+          analytics: const NoOpAnalytics(),
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         );
       });
 
@@ -533,12 +560,23 @@ void main() {
       late XCDevice xcdevice;
       late Xcode xcode;
       late MemoryFileSystem fileSystem;
+<<<<<<< HEAD
+=======
+      late FakeAnalytics fakeAnalytics;
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
       late FakeIOSCoreDeviceControl coreDeviceControl;
 
       setUp(() {
         xcode = Xcode.test(processManager: FakeProcessManager.any());
         fileSystem = MemoryFileSystem.test();
         coreDeviceControl = FakeIOSCoreDeviceControl();
+<<<<<<< HEAD
+=======
+        fakeAnalytics = getInitializedFakeAnalyticsInstance(
+          fs: fileSystem,
+          fakeFlutterVersion: FakeFlutterVersion(),
+        );
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         xcdevice = XCDevice(
           processManager: fakeProcessManager,
           logger: logger,
@@ -550,6 +588,10 @@ void main() {
           fileSystem: fileSystem,
           coreDeviceControl: coreDeviceControl,
           xcodeDebug: FakeXcodeDebug(),
+<<<<<<< HEAD
+=======
+          analytics: fakeAnalytics,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         );
       });
 
@@ -1447,6 +1489,16 @@ void main() {
             expect(devices[4].devModeEnabled, true);
 
             expect(fakeProcessManager, hasNoRemainingExpectations);
+<<<<<<< HEAD
+=======
+
+            expect(fakeAnalytics.sentEvents, contains(
+              Event.appleUsageEvent(
+                  workflow: 'device',
+                  parameter: 'ios-trust-failure',
+                )
+            ));
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
           }, overrides: <Type, Generator>{
             Platform: () => macPlatform,
             Artifacts: () => Artifacts.test(),

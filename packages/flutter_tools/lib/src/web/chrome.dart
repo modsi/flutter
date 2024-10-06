@@ -6,8 +6,10 @@ import 'dart:async';
 
 import 'package:meta/meta.dart';
 import 'package:process/process.dart';
-import 'package:webkit_inspection_protocol/webkit_inspection_protocol.dart';
+import 'package:webkit_inspection_protocol/webkit_inspection_protocol.dart'
+    hide StackTrace;
 
+import '../base/async_guard.dart';
 import '../base/common.dart';
 import '../base/file_system.dart';
 import '../base/io.dart';
@@ -171,13 +173,22 @@ class ChromiumLauncher {
       throwToolExit('Only one instance of chrome can be started.');
     }
 
+    if (_logger.isVerbose) {
+      _logger.printTrace('Launching Chromium (url = $url, headless = $headless, skipCheck = $skipCheck, debugPort = $debugPort)');
+    }
+
     final String chromeExecutable = _browserFinder(_platform, _fileSystem);
 
-    if (_logger.isVerbose && !_platform.isWindows) {
-      // The "--version" argument is not supported on Windows.
-      final ProcessResult versionResult = await _processManager.run(<String>[chromeExecutable, '--version']);
-      _logger.printTrace('Using ${versionResult.stdout}');
+    if (_logger.isVerbose) {
+      _logger.printTrace('Will use Chromium executable at $chromeExecutable');
+
+      if (!_platform.isWindows) {
+        // The "--version" argument is not supported on Windows.
+        final ProcessResult versionResult = await _processManager.run(<String>[chromeExecutable, '--version']);
+        _logger.printTrace('Using ${versionResult.stdout}');
+      }
     }
+
 
     final Directory userDataDir = _fileSystem.systemTempDirectory
       .createTempSync('flutter_tools_chrome_device.');
@@ -216,10 +227,10 @@ class ChromiumLauncher {
       url,
     ];
 
-    final Process? process = await _spawnChromiumProcess(args, chromeExecutable);
+    final Process process = await _spawnChromiumProcess(args, chromeExecutable);
 
     // When the process exits, copy the user settings back to the provided data-dir.
-    if (process != null && cacheDir != null) {
+    if (cacheDir != null) {
       unawaited(process.exitCode.whenComplete(() {
         _cacheUserSessionInformation(userDataDir, cacheDir);
         // cleanup temp dir
@@ -236,10 +247,11 @@ class ChromiumLauncher {
       url: url,
       process: process,
       chromiumLauncher: this,
+      logger: _logger,
     ), skipCheck);
   }
 
-  Future<Process?> _spawnChromiumProcess(List<String> args, String chromeExecutable) async {
+  Future<Process> _spawnChromiumProcess(List<String> args, String chromeExecutable) async {
     if (_operatingSystemUtils.hostPlatform == HostPlatform.darwin_arm64) {
       final ProcessResult result = _processManager.runSync(<String>['file', chromeExecutable]);
       // Check if ARM Chrome is installed.
@@ -405,7 +417,7 @@ class ChromiumLauncher {
     // connection is valid.
     if (!skipCheck) {
       try {
-        await _getFirstTab(chrome);
+        await chrome._validateChromeConnection();
       } on Exception catch (error, stackTrace) {
         _logger.printError('$error', stackTrace: stackTrace);
         await chrome.close();
@@ -417,40 +429,6 @@ class ChromiumLauncher {
     return chrome;
   }
 
-  /// Gets the first [chrome] tab.
-  ///
-  /// Retries getting tabs from Chrome for a few seconds and retries finding
-  /// the tab a few times. This reduces flakes caused by Chrome not returning
-  /// correct output if the call was too close to the start.
-  //
-  // TODO(ianh): remove the timeouts here, they violate our style guide.
-  // (We should just keep waiting forever, and print a warning when it's
-  // taking too long.)
-  Future<ChromeTab?> _getFirstTab(Chromium chrome) async {
-    const Duration retryFor = Duration(seconds: 2);
-    const int attempts = 5;
-
-    for (int i = 1; i <= attempts; i++) {
-      try {
-        final List<ChromeTab> tabs =
-          await chrome.chromeConnection.getTabs(retryFor: retryFor);
-
-        if (tabs.isNotEmpty) {
-          return tabs.first;
-        }
-        if (i == attempts) {
-          return null;
-        }
-      } on ConnectionException catch (_) {
-        if (i == attempts) {
-          rethrow;
-        }
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 25));
-    }
-    return null;
-  }
-
   Future<Chromium> get connectedInstance => currentCompleter.future;
 }
 
@@ -460,25 +438,147 @@ class Chromium {
     this.debugPort,
     this.chromeConnection, {
     this.url,
-    Process? process,
+    required Process process,
     required ChromiumLauncher chromiumLauncher,
+    required Logger logger,
   })  : _process = process,
-        _chromiumLauncher = chromiumLauncher;
+        _chromiumLauncher = chromiumLauncher,
+        _logger = logger;
 
   final String? url;
   final int debugPort;
-  final Process? _process;
+  final Process _process;
   final ChromeConnection chromeConnection;
   final ChromiumLauncher _chromiumLauncher;
+  final Logger _logger;
+  bool _hasValidChromeConnection = false;
 
-  Future<int?> get onExit async => _process?.exitCode;
+  /// Resolves to browser's main process' exit code, when the browser exits.
+  Future<int> get onExit async => _process.exitCode;
 
+  /// The main Chromium process that represents this instance of Chromium.
+  ///
+  /// Killing this process should result in the browser exiting.
+  @visibleForTesting
+  Process get process => _process;
+
+  /// Gets the first [chrome] tab in order to verify that the connection to
+  /// the Chrome debug protocol is working properly.
+  ///
+  /// Retries getting tabs from Chrome for a few seconds and retries finding
+  /// the tab a few times. This reduces flakes caused by Chrome not returning
+  /// correct output if the call was too close to the start.
+  //
+  // TODO(ianh): remove the timeouts here, they violate our style guide.
+  // (We should just keep waiting forever, and print a warning when it's
+  // taking too long.)
+  Future<void> _validateChromeConnection() async {
+    const Duration retryFor = Duration(seconds: 2);
+    const int attempts = 5;
+
+    for (int i = 1; i <= attempts; i++) {
+      try {
+        final List<ChromeTab> tabs =
+          await chromeConnection.getTabs(retryFor: retryFor);
+
+        if (tabs.isNotEmpty) {
+          _hasValidChromeConnection = true;
+          return;
+        }
+        if (i == attempts) {
+          return;
+        }
+      } on ConnectionException catch (_) {
+        if (i == attempts) {
+          rethrow;
+        }
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+  }
+
+  /// Closes all connections to the browser and asks the browser to exit.
   Future<void> close() async {
+    if (_logger.isVerbose) {
+      _logger.printTrace('Shutting down Chromium.');
+    }
     if (_chromiumLauncher.hasChromeInstance) {
       _chromiumLauncher.currentCompleter = Completer<Chromium>();
     }
+
+    // Send a command to shut down the browser cleanly.
+    Duration sigtermDelay = Duration.zero;
+    if (_hasValidChromeConnection) {
+      final ChromeTab? tab = await getChromeTabGuarded(chromeConnection,
+            (_) => true, retryFor: const Duration(seconds: 1));
+      if (tab != null) {
+        final WipConnection wipConnection = await tab.connect();
+        await wipConnection.sendCommand('Browser.close');
+        await wipConnection.close();
+        sigtermDelay = const Duration(seconds: 1);
+      }
+    }
     chromeConnection.close();
-    _process?.kill();
-    await _process?.exitCode;
+    _hasValidChromeConnection = false;
+
+    // If the browser close command did not shut down the process, then try to
+    // exit Chromium using SIGTERM.
+    await _process.exitCode.timeout(sigtermDelay, onTimeout: () {
+      ProcessSignal.sigterm.kill(_process);
+      return 0;
+    });
+    // If the process still has not ended, then use SIGKILL. Wait up to 5
+    // seconds for Chromium to exit before falling back to SIGKILL and then to
+    // a warning message.
+    await _process.exitCode.timeout(const Duration(seconds: 5), onTimeout: () {
+      _logger.printWarning(
+        'Failed to exit Chromium (pid: ${_process.pid}) using SIGTERM. Will try '
+        'sending SIGKILL instead.'
+      );
+      ProcessSignal.sigkill.kill(_process);
+      return _process.exitCode.timeout(const Duration(seconds: 5), onTimeout: () async {
+        _logger.printWarning(
+          'Failed to exit Chromium (pid: ${_process.pid}) using SIGKILL. Giving '
+          'up. Will continue, assuming Chromium has exited successfully, but '
+          'it is possible that this left a dangling Chromium process running '
+          'on the system.'
+        );
+        return 0;
+      });
+    });
+  }
+}
+
+/// Wrapper for [ChromeConnection.getTab] that will catch any [IOException] or
+/// [StateError], delegate it to the [onIoError] callback, and return null.
+///
+/// This is useful for callers who are want to retrieve a [ChromeTab], but
+/// are okay with the operation failing (e.g. due to an network IO issue or
+/// the Chrome process no longer existing).
+Future<ChromeTab?> getChromeTabGuarded(
+  ChromeConnection chromeConnection,
+  bool Function(ChromeTab tab) accept, {
+  Duration? retryFor,
+  void Function(Object error, StackTrace stackTrace)? onIoError,
+}) async {
+  try {
+    return await asyncGuard(
+      () => chromeConnection.getTab(
+        accept,
+        retryFor: retryFor,
+      ),
+    );
+  } on IOException catch (error, stackTrace) {
+    if (onIoError != null) {
+      onIoError(error, stackTrace);
+    }
+    return null;
+    // The underlying HttpClient will throw a StateError when it tries to
+    // perform a request despite the connection already being closed.
+  } on StateError catch (error, stackTrace) {
+    if (onIoError != null) {
+      onIoError(error, stackTrace);
+    }
+    return null;
   }
 }

@@ -20,11 +20,15 @@ import 'focus_scope.dart';
 import 'focus_traversal.dart';
 import 'framework.dart';
 import 'heroes.dart';
+import 'notification_listener.dart';
 import 'overlay.dart';
 import 'restoration.dart';
 import 'restoration_properties.dart';
 import 'routes.dart';
 import 'ticker_provider.dart';
+
+// Duration for delay before refocusing in android so that the focus won't be interrupted.
+const Duration _kAndroidRefocusingDelayDuration = Duration(milliseconds: 300);
 
 // Examples can assume:
 // typedef MyAppHome = Placeholder;
@@ -67,6 +71,10 @@ typedef RoutePredicate = bool Function(Route<dynamic> route);
 ///
 /// Used by [Form.onWillPop], [ModalRoute.addScopedWillPopCallback],
 /// [ModalRoute.removeScopedWillPopCallback], and [WillPopScope].
+@Deprecated(
+  'Use PopInvokedCallback instead. '
+  'This feature was deprecated after v3.12.0-1.0.pre.',
+)
 typedef WillPopCallback = Future<bool> Function();
 
 /// Signature for the [Navigator.onPopPage] callback.
@@ -77,6 +85,14 @@ typedef WillPopCallback = Future<bool> Function();
 /// (Otherwise, the page will be interpreted as a new page to show when the
 /// [Navigator.pages] list is next updated.)
 typedef PopPageCallback = bool Function(Route<dynamic> route, dynamic result);
+
+/// Signature for the [Navigator.onDidRemovePage] callback.
+///
+/// This must properly update the pages list the next time it is passed into
+/// [Navigator.pages] so that it no longer includes the input `page`.
+/// (Otherwise, the page will be interpreted as a new page to show when the
+/// [Navigator.pages] list is next updated.)
+typedef DidRemovePageCallback = void Function(Page<Object?> page);
 
 /// Indicates whether the current route should be popped.
 ///
@@ -89,19 +105,21 @@ typedef PopPageCallback = bool Function(Route<dynamic> route, dynamic result);
 enum RoutePopDisposition {
   /// Pop the route.
   ///
-  /// If [Route.willPop] returns [pop] then the back button will actually pop
-  /// the current route.
+  /// If [Route.willPop] or [Route.popDisposition] return [pop] then the back
+  /// button will actually pop the current route.
   pop,
 
   /// Do not pop the route.
   ///
-  /// If [Route.willPop] returns [doNotPop] then the back button will be ignored.
+  /// If [Route.willPop] or [Route.popDisposition] return [doNotPop] then the
+  /// back button will be ignored.
   doNotPop,
 
   /// Delegate this to the next level of navigation.
   ///
-  /// If [Route.willPop] returns [bubble] then the back button will be handled
-  /// by the [SystemNavigator], which will usually close the application.
+  /// If [Route.willPop] or [Route.popDisposition] return [bubble] then the back
+  /// button will be handled by the [SystemNavigator], which will usually close
+  /// the application.
   bubble,
 }
 
@@ -128,12 +146,20 @@ enum RoutePopDisposition {
 /// The type argument `T` is the route's return type, as used by
 /// [currentResult], [popped], and [didPop]. The type `void` may be used if the
 /// route does not return a value.
-abstract class Route<T> {
+abstract class Route<T> extends _RoutePlaceholder {
   /// Initialize the [Route].
   ///
   /// If the [settings] are not provided, an empty [RouteSettings] object is
   /// used instead.
-  Route({ RouteSettings? settings }) : _settings = settings ?? const RouteSettings();
+  Route({ RouteSettings? settings }) : _settings = settings ?? const RouteSettings() {
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectCreated(
+        library: 'package:flutter/widgets.dart',
+        className: '$Route<$T>',
+        object: this,
+      );
+    }
+  }
 
   /// The navigator that the route is in, if any.
   NavigatorState? get navigator => _navigator;
@@ -154,6 +180,8 @@ abstract class Route<T> {
   /// remains with its last value).
   RouteSettings get settings => _settings;
   RouteSettings _settings;
+
+  bool get _isPageBased => settings is Page<Object?>;
 
   /// The restoration scope ID to be used for the [RestorationScope] surrounding
   /// this route.
@@ -294,8 +322,73 @@ abstract class Route<T> {
   ///    mechanism.
   ///  * [WillPopScope], another widget that provides a way to intercept the
   ///    back button.
+  @Deprecated(
+    'Use popDisposition instead. '
+    'This feature was deprecated after v3.12.0-1.0.pre.',
+  )
   Future<RoutePopDisposition> willPop() async {
     return isFirst ? RoutePopDisposition.bubble : RoutePopDisposition.pop;
+  }
+
+  /// Returns whether calling [Navigator.maybePop] when this [Route] is current
+  /// ([isCurrent]) should do anything.
+  ///
+  /// [Navigator.maybePop] is usually used instead of [Navigator.pop] to handle
+  /// the system back button, when it hasn't been disabled via
+  /// [SystemNavigator.setFrameworkHandlesBack].
+  ///
+  /// By default, if a [Route] is the first route in the history (i.e., if
+  /// [isFirst]), it reports that pops should be bubbled
+  /// ([RoutePopDisposition.bubble]). This behavior prevents the user from
+  /// popping the first route off the history and being stranded at a blank
+  /// screen; instead, the larger scope is popped (e.g. the application quits,
+  /// so that the user returns to the previous application).
+  ///
+  /// In other cases, the default behavior is to accept the pop
+  /// ([RoutePopDisposition.pop]).
+  ///
+  /// The third possible value is [RoutePopDisposition.doNotPop], which causes
+  /// the pop request to be ignored entirely.
+  ///
+  /// See also:
+  ///
+  ///  * [Form], which provides a [Form.canPop] boolean that is similar.
+  ///  * [PopScope], a widget that provides a way to intercept the back button.
+  ///  * [Page.canPop], a way for [Page] to affect this property.
+  RoutePopDisposition get popDisposition {
+    if (_isPageBased) {
+      final Page<Object?> page = settings as Page<Object?>;
+      if (!page.canPop) {
+        return RoutePopDisposition.doNotPop;
+      }
+    }
+    return isFirst ? RoutePopDisposition.bubble : RoutePopDisposition.pop;
+  }
+
+  /// Called after a route pop was handled.
+  ///
+  /// Even when the pop is canceled, for example by a [PopScope] widget, this
+  /// will still be called. The `didPop` parameter indicates whether or not the
+  /// back navigation actually happened successfully.
+  @Deprecated(
+    'Override onPopInvokedWithResult instead. '
+    'This feature was deprecated after v3.22.0-12.0.pre.',
+  )
+  void onPopInvoked(bool didPop) {}
+
+  /// {@template flutter.widgets.navigator.onPopInvokedWithResult}
+  /// Called after a route pop was handled.
+  ///
+  /// Even when the pop is canceled, for example by a [PopScope] widget, this
+  /// will still be called. The `didPop` parameter indicates whether or not the
+  /// back navigation actually happened successfully.
+  /// {@endtemplate}
+  @mustCallSuper
+  void onPopInvokedWithResult(bool didPop, T? result) {
+    if (_isPageBased) {
+      final Page<Object?> page = settings as Page<Object?>;
+      page.onPopInvoked(didPop, result);
+    }
   }
 
   /// Whether calling [didPop] would return false.
@@ -315,6 +408,8 @@ abstract class Route<T> {
   /// on this topic.
   Future<T?> get popped => _popCompleter.future;
   final Completer<T?> _popCompleter = Completer<T?>();
+
+  final Completer<T?> _disposeCompleter = Completer<T?>();
 
   /// A request was made to pop this route. If the route can handle it
   /// internally (e.g. because it has its own stack of internal state) then
@@ -455,6 +550,10 @@ abstract class Route<T> {
   void dispose() {
     _navigator = null;
     _restorationScopeId.dispose();
+    _disposeCompleter.complete();
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectDisposed(object: this);
+    }
   }
 
   /// Whether this route is the top-most route on the navigator.
@@ -513,10 +612,7 @@ abstract class Route<T> {
   /// rendered. It is even possible for the route to be active but for the stateful
   /// widgets within the route to not be instantiated. See [ModalRoute.maintainState].
   bool get isActive {
-    if (_navigator == null) {
-      return false;
-    }
-    return _navigator!._firstRouteEntryWhereOrNull(_RouteEntry.isRoutePredicate(this))?.isPresent ?? false;
+    return _navigator?._firstRouteEntryWhereOrNull(_RouteEntry.isRoutePredicate(this))?.isPresent ?? false;
   }
 }
 
@@ -548,20 +644,31 @@ class RouteSettings {
 /// The type argument `T` is the corresponding [Route]'s return type, as
 /// used by [Route.currentResult], [Route.popped], and [Route.didPop].
 ///
+/// The [canPop] and [onPopInvoked] are used for intercepting pops.
+///
+/// {@tool dartpad}
+/// This sample demonstrates how to use this [canPop] and [onPopInvoked] to
+/// intercept pops.
+///
+/// ** See code in examples/api/lib/widgets/page/page_can_pop.0.dart **
+/// {@end-tool}
+///
 /// See also:
 ///
 ///  * [Navigator.pages], which accepts a list of [Page]s and updates its routes
 ///    history.
 abstract class Page<T> extends RouteSettings {
   /// Creates a page and initializes [key] for subclasses.
-  ///
-  /// The [arguments] argument must not be null.
   const Page({
     this.key,
     super.name,
     super.arguments,
     this.restorationId,
+    this.canPop = true,
+    this.onPopInvoked = _defaultPopInvokedHandler,
   });
+
+  static void _defaultPopInvokedHandler(bool didPop, Object? result) { }
 
   /// The key associated with this page.
   ///
@@ -578,6 +685,28 @@ abstract class Page<T> extends RouteSettings {
   ///  * [RestorationManager], which explains how state restoration works in
   ///    Flutter.
   final String? restorationId;
+
+  /// Called after a pop on the associated route was handled.
+  ///
+  /// It's not possible to prevent the pop from happening at the time that this
+  /// method is called; the pop has already happened. Use [canPop] to
+  /// disable pops in advance.
+  ///
+  /// This will still be called even when the pop is canceled. A pop is canceled
+  /// when the associated [Route.popDisposition] returns false, or when
+  /// [canPop] is set to false. The `didPop` parameter indicates whether or not
+  /// the back navigation actually happened successfully.
+  final PopInvokedWithResultCallback<T> onPopInvoked;
+
+  /// When false, blocks the associated route from being popped.
+  ///
+  /// If this is set to false for first page in the Navigator. It prevents
+  /// Flutter app from exiting.
+  ///
+  /// If there are any [PopScope] widgets in a route's widget subtree,
+  /// each of their `canPop` must be `true`, in addition to this canPop, in
+  /// order for the route to be able to pop.
+  final bool canPop;
 
   /// Whether this page can be updated with the [other] page.
   ///
@@ -643,7 +772,7 @@ class NavigatorObserver {
   /// The [Navigator]'s routes are being moved by a user gesture.
   ///
   /// For example, this is called when an iOS back gesture starts, and is used
-  /// to disabled hero animations during such interactions.
+  /// to disable hero animations during such interactions.
   void didStartUserGesture(Route<dynamic> route, Route<dynamic>? previousRoute) { }
 
   /// User gesture is no longer controlling the [Navigator].
@@ -1087,9 +1216,7 @@ class DefaultTransitionDelegate<T> extends TransitionDelegate<T> {
 /// The default value of [Navigator.routeTraversalEdgeBehavior].
 ///
 /// {@macro flutter.widgets.navigator.routeTraversalEdgeBehavior}
-const TraversalEdgeBehavior kDefaultRouteTraversalEdgeBehavior = kIsWeb
-  ? TraversalEdgeBehavior.leaveFlutterView
-  : TraversalEdgeBehavior.closedLoop;
+const TraversalEdgeBehavior kDefaultRouteTraversalEdgeBehavior = TraversalEdgeBehavior.parentScope;
 
 /// A widget that manages a set of child widgets with a stack discipline.
 ///
@@ -1392,13 +1519,14 @@ const TraversalEdgeBehavior kDefaultRouteTraversalEdgeBehavior = kIsWeb
 class Navigator extends StatefulWidget {
   /// Creates a widget that maintains a stack-based history of child widgets.
   ///
-  /// The [onGenerateRoute], [pages], [onGenerateInitialRoutes],
-  /// [transitionDelegate], [observers] arguments must not be null.
-  ///
   /// If the [pages] is not empty, the [onPopPage] must not be null.
   const Navigator({
     super.key,
     this.pages = const <Page<dynamic>>[],
+    @Deprecated(
+      'Use onDidRemovePage instead. '
+      'This feature was deprecated after v3.16.0-17.0.pre.',
+    )
     this.onPopPage,
     this.initialRoute,
     this.onGenerateInitialRoutes = Navigator.defaultGenerateInitialRoutes,
@@ -1411,6 +1539,7 @@ class Navigator extends StatefulWidget {
     this.requestFocus = true,
     this.restorationScopeId,
     this.routeTraversalEdgeBehavior = kDefaultRouteTraversalEdgeBehavior,
+    this.onDidRemovePage,
   });
 
   /// The list of pages with which to populate the history.
@@ -1443,6 +1572,8 @@ class Navigator extends StatefulWidget {
   /// corresponding to [pages] in the initial history.
   final List<Page<dynamic>> pages;
 
+  /// This is deprecated and replaced by [onDidRemovePage].
+  ///
   /// Called when [pop] is invoked but the current [Route] corresponds to a
   /// [Page] found in the [pages] list.
   ///
@@ -1456,12 +1587,31 @@ class Navigator extends StatefulWidget {
   /// contain the [Page] for the given [Route]. The next time the [pages] list
   /// is updated, if the [Page] corresponding to this [Route] is still present,
   /// it will be interpreted as a new route to display.
+  @Deprecated(
+    'Use onDidRemovePage instead. '
+    'This feature was deprecated after v3.16.0-17.0.pre.',
+  )
   final PopPageCallback? onPopPage;
+
+  /// Called when the [Route] associated with the given [Page] has been removed
+  /// from the Navigator.
+  ///
+  /// This can happen when the route is removed or completed through
+  /// [Navigator.pop], [Navigator.pushReplacement], or its friends.
+  ///
+  /// This callback is responsible for removing the given page from the list of
+  /// [pages].
+  ///
+  /// The [Navigator] widget should be rebuilt with a [pages] list that does not
+  /// contain the given page [Page]. The next time the [pages] list
+  /// is updated, if the given [Page] is still present, it will be interpreted
+  /// as a new page to display.
+  final DidRemovePageCallback? onDidRemovePage;
 
   /// The delegate used for deciding how routes transition in or off the screen
   /// during the [pages] updates.
   ///
-  /// Defaults to [DefaultTransitionDelegate] if not specified, cannot be null.
+  /// Defaults to [DefaultTransitionDelegate].
   final TransitionDelegate<dynamic> transitionDelegate;
 
   /// The name of the first route to show.
@@ -1470,6 +1620,10 @@ class Navigator extends StatefulWidget {
   ///
   /// The value is interpreted according to [onGenerateInitialRoutes], which
   /// defaults to [defaultGenerateInitialRoutes].
+  ///
+  /// Changing the [initialRoute] will have no effect, as it only controls the
+  /// _initial_ route. To change the route while the application is running, use
+  /// the static functions on this class, such as [push] or [replace].
   final String? initialRoute;
 
   /// Called to generate a route for a given [RouteSettings].
@@ -1514,7 +1668,7 @@ class Navigator extends StatefulWidget {
   ///  * [Navigator], which explains under the heading "state restoration"
   ///    how and under what conditions the navigator restores its state.
   ///  * [Navigator.restorablePush], which includes an example showcasing how
-  ///    to push a restorable route unto the navigator.
+  ///    to push a restorable route onto the navigator.
   /// {@endtemplate}
   final String? restorationScopeId;
 
@@ -1550,7 +1704,7 @@ class Navigator extends StatefulWidget {
   /// The callback must return a list of [Route] objects with which the history
   /// will be primed.
   ///
-  /// When parsing the initialRoute, if there's any chance that the it may
+  /// When parsing the initialRoute, if there's any chance that it may
   /// contain complex characters, it's best to use the
   /// [characters](https://pub.dev/packages/characters) API. This will ensure
   /// that extended grapheme clusters and surrogate pairs are treated as single
@@ -1589,7 +1743,7 @@ class Navigator extends StatefulWidget {
   /// In cases where clipping is not desired, consider setting this property to
   /// [Clip.none].
   ///
-  /// Defaults to [Clip.hardEdge], and must not be null.
+  /// Defaults to [Clip.hardEdge].
   final Clip clipBehavior;
 
   /// Whether or not the navigator and it's new topmost route should request focus
@@ -1778,7 +1932,7 @@ class Navigator extends StatefulWidget {
   /// [NavigatorObserver.didReplace]). The removed route is notified once the
   /// new route has finished animating (see [Route.didComplete]). The removed
   /// route's exit animation is not run (see [popAndPushNamed] for a variant
-  /// that does animated the removed route).
+  /// that animates the removed route).
   ///
   /// Ongoing gestures within the current route are canceled when a new route is
   /// pushed.
@@ -2411,6 +2565,9 @@ class Navigator extends StatefulWidget {
   /// the initial route.
   ///
   /// If there is no [Navigator] in scope, returns false.
+  ///
+  /// Does not consider anything that might externally prevent popping, such as
+  /// [PopEntry].
   /// {@endtemplate}
   ///
   /// See also:
@@ -2422,21 +2579,22 @@ class Navigator extends StatefulWidget {
     return navigator != null && navigator.canPop();
   }
 
-  /// Consults the current route's [Route.willPop] method, and acts accordingly,
-  /// potentially popping the route as a result; returns whether the pop request
-  /// should be considered handled.
+  /// Consults the current route's [Route.popDisposition] getter or
+  /// [Route.willPop] method, and acts accordingly, potentially popping the
+  /// route as a result; returns whether the pop request should be considered
+  /// handled.
   ///
   /// {@template flutter.widgets.navigator.maybePop}
-  /// If [Route.willPop] returns [RoutePopDisposition.pop], then the [pop]
+  /// If the [RoutePopDisposition] is [RoutePopDisposition.pop], then the [pop]
   /// method is called, and this method returns true, indicating that it handled
   /// the pop request.
   ///
-  /// If [Route.willPop] returns [RoutePopDisposition.doNotPop], then this
+  /// If the [RoutePopDisposition] is [RoutePopDisposition.doNotPop], then this
   /// method returns true, but does not do anything beyond that.
   ///
-  /// If [Route.willPop] returns [RoutePopDisposition.bubble], then this method
-  /// returns false, and the caller is responsible for sending the request to
-  /// the containing scope (e.g. by closing the application).
+  /// If the [RoutePopDisposition] is [RoutePopDisposition.bubble], then this
+  /// method returns false, and the caller is responsible for sending the
+  /// request to the containing scope (e.g. by closing the application).
   ///
   /// This method is typically called for a user-initiated [pop]. For example on
   /// Android it's called by the binding for the system's back button.
@@ -2604,7 +2762,7 @@ class Navigator extends StatefulWidget {
   /// this class is given instead. Useful for pushing contents above all
   /// subsequent instances of [Navigator].
   ///
-  /// If there is no [Navigator] in the give `context`, this function will throw
+  /// If there is no [Navigator] in the given `context`, this function will throw
   /// a [FlutterError] in debug mode, and an exception in release mode.
   ///
   /// This method can be expensive (it walks the element tree).
@@ -2725,6 +2883,9 @@ class Navigator extends StatefulWidget {
           );
           return true;
         }());
+        for (final Route<dynamic>? route in result) {
+          route?.dispose();
+        }
         result.clear();
       }
     } else if (initialRouteName != Navigator.defaultRouteName) {
@@ -2735,7 +2896,7 @@ class Navigator extends StatefulWidget {
     // Null route might be a result of gap in initialRouteName
     //
     // For example, routes = ['A', 'A/B/C'], and initialRouteName = 'A/B/C'
-    // This should result in result = ['A', null,'A/B/C'] where 'A/B' produces
+    // This should result in result = ['A', null, 'A/B/C'] where 'A/B' produces
     // the null. In this case, we want to filter out the null and return
     // result = ['A', 'A/B/C'].
     result.removeWhere((Route<dynamic>? route) => route == null);
@@ -2830,10 +2991,9 @@ enum _RouteLifecycle {
 
 typedef _RouteEntryPredicate = bool Function(_RouteEntry entry);
 
-class _NotAnnounced extends Route<void> {
-  // A placeholder for the lastAnnouncedPreviousRoute, the
-  // lastAnnouncedPoppedNextRoute, and the lastAnnouncedNextRoute before any
-  // change has been announced.
+/// Placeholder for a route.
+class _RoutePlaceholder {
+  const _RoutePlaceholder();
 }
 
 class _RouteEntry extends RouteTransitionRecord {
@@ -2850,19 +3010,34 @@ class _RouteEntry extends RouteTransitionRecord {
            initialState == _RouteLifecycle.pushReplace ||
            initialState == _RouteLifecycle.replace,
          ),
-         currentState = initialState;
+         currentState = initialState {
+    // TODO(polina-c): stop duplicating code across disposables
+    // https://github.com/flutter/flutter/issues/137435
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectCreated(
+        library: 'package:flutter/widgets.dart',
+        className: '$_RouteEntry',
+        object: this,
+      );
+    }
+  }
 
   @override
   final Route<dynamic> route;
   final _RestorationInformation? restorationInformation;
   final bool pageBased;
 
-  static Route<dynamic> notAnnounced = _NotAnnounced();
+  /// The limit this route entry will attempt to pop in the case of route being
+  /// remove as a result of a page update.
+  static const int kDebugPopAttemptLimit = 100;
+
+  static const _RoutePlaceholder notAnnounced = _RoutePlaceholder();
 
   _RouteLifecycle currentState;
-  Route<dynamic>? lastAnnouncedPreviousRoute = notAnnounced; // last argument to Route.didChangePrevious
-  Route<dynamic> lastAnnouncedPoppedNextRoute = notAnnounced; // last argument to Route.didPopNext
-  Route<dynamic>? lastAnnouncedNextRoute = notAnnounced; // last argument to Route.didChangeNext
+  _RoutePlaceholder? lastAnnouncedPreviousRoute = notAnnounced; // last argument to Route.didChangePrevious
+  WeakReference<_RoutePlaceholder> lastAnnouncedPoppedNextRoute = WeakReference<_RoutePlaceholder>(notAnnounced); // last argument to Route.didPopNext
+  _RoutePlaceholder? lastAnnouncedNextRoute = notAnnounced; // last argument to Route.didChangeNext
+  int? lastFocusNode; // The last focused semantic node for the route entry.
 
   /// Restoration ID to be used for the encapsulating route when restoration is
   /// enabled for it or null if restoration cannot be enabled for it.
@@ -2950,7 +3125,25 @@ class _RouteEntry extends RouteTransitionRecord {
 
   void handleDidPopNext(Route<dynamic> poppedRoute) {
     route.didPopNext(poppedRoute);
-    lastAnnouncedPoppedNextRoute = poppedRoute;
+    lastAnnouncedPoppedNextRoute = WeakReference<Route<dynamic>>(poppedRoute);
+    if (lastFocusNode != null) {
+      // Move focus back to the last focused node.
+      poppedRoute._disposeCompleter.future.then((dynamic result) async {
+        switch (defaultTargetPlatform) {
+          case TargetPlatform.android:
+            // In the Android platform, we have to wait for the system refocus to complete before
+            // sending the refocus message. Otherwise, the refocus message will be ignored.
+            // TODO(hangyujin): update this logic if Android provide a better way to do so.
+            final int? reFocusNode = lastFocusNode;
+            await Future<void>.delayed(_kAndroidRefocusingDelayDuration);
+            SystemChannels.accessibility.send(const FocusSemanticEvent().toMap(nodeId: reFocusNode));
+          case TargetPlatform.iOS:
+            SystemChannels.accessibility.send(const FocusSemanticEvent().toMap(nodeId: lastFocusNode));
+          case _:
+            break ;
+        }
+      });
+    }
   }
 
   /// Process the to-be-popped route.
@@ -2974,6 +3167,11 @@ class _RouteEntry extends RouteTransitionRecord {
     if (!route.didPop(pendingResult)) {
       currentState = _RouteLifecycle.idle;
       return false;
+    }
+    route.onPopInvokedWithResult(true, pendingResult);
+    if (pageBased) {
+      final Page<Object?> page = route.settings as Page<Object?>;
+      navigator.widget.onDidRemovePage?.call(page);
     }
     pendingResult = null;
     return true;
@@ -3057,6 +3255,11 @@ class _RouteEntry extends RouteTransitionRecord {
   /// before disposing.
   void forcedDispose() {
     assert(currentState.index < _RouteLifecycle.disposed.index);
+    // TODO(polina-c): stop duplicating code across disposables
+    // https://github.com/flutter/flutter/issues/137435
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectDisposed(object: this);
+    }
     currentState = _RouteLifecycle.disposed;
     route.dispose();
   }
@@ -3149,7 +3352,7 @@ class _RouteEntry extends RouteTransitionRecord {
     // already announced this change by calling didPopNext.
     return !(
       nextRoute == null &&
-        lastAnnouncedPoppedNextRoute == lastAnnouncedNextRoute
+        lastAnnouncedPoppedNextRoute.target == lastAnnouncedNextRoute
     );
   }
 
@@ -3197,6 +3400,20 @@ class _RouteEntry extends RouteTransitionRecord {
       'This route cannot be marked for pop. Either a decision has already been '
       'made or it does not require an explicit decision on how to transition out.',
     );
+    // Remove state that prevents a pop, e.g. LocalHistoryEntry[s].
+    int attempt = 0;
+    while (route.willHandlePopInternally) {
+      assert(
+        () {
+          attempt += 1;
+          return attempt < kDebugPopAttemptLimit;
+        }(),
+        'Attempted to pop $route $kDebugPopAttemptLimit times, but still failed',
+      );
+      final bool popResult = route.didPop(result);
+      assert(!popResult);
+
+    }
     pop<dynamic>(result);
     _isWaitingForExitingDecision = false;
   }
@@ -3291,12 +3508,85 @@ class _NavigatorReplaceObservation extends _NavigatorObservation {
   }
 }
 
+typedef _IndexWhereCallback = bool Function(_RouteEntry element);
+
+/// A collection of _RouteEntries representing a navigation history.
+///
+/// Acts as a ChangeNotifier and notifies after its List of _RouteEntries is
+/// mutated.
+class _History extends Iterable<_RouteEntry> with ChangeNotifier {
+  /// Creates an instance of [_History].
+  _History() {
+    if (kFlutterMemoryAllocationsEnabled) {
+      ChangeNotifier.maybeDispatchObjectCreation(this);
+    }
+  }
+
+  final List<_RouteEntry> _value = <_RouteEntry>[];
+
+  int indexWhere(_IndexWhereCallback test, [int start = 0]) {
+    return _value.indexWhere(test, start);
+  }
+
+  void add(_RouteEntry element) {
+    _value.add(element);
+    notifyListeners();
+  }
+
+  void addAll(Iterable<_RouteEntry> elements) {
+    _value.addAll(elements);
+    if (elements.isNotEmpty) {
+      notifyListeners();
+    }
+  }
+
+  void clear() {
+    final bool valueWasEmpty = _value.isEmpty;
+    _value.clear();
+    if (!valueWasEmpty) {
+      notifyListeners();
+    }
+  }
+
+  void insert(int index, _RouteEntry element) {
+    _value.insert(index, element);
+    notifyListeners();
+  }
+
+  _RouteEntry removeAt(int index) {
+    final _RouteEntry entry = _value.removeAt(index);
+    notifyListeners();
+    return entry;
+  }
+
+  _RouteEntry removeLast() {
+    final _RouteEntry entry = _value.removeLast();
+    notifyListeners();
+    return entry;
+  }
+
+  _RouteEntry operator [](int index) {
+    return _value[index];
+  }
+
+  @override
+  Iterator<_RouteEntry> get iterator {
+    return _value.iterator;
+  }
+
+  @override
+  String toString() {
+    return _value.toString();
+  }
+}
+
 /// The state for a [Navigator] widget.
 ///
 /// A reference to this class can be obtained by calling [Navigator.of].
 class NavigatorState extends State<Navigator> with TickerProviderStateMixin, RestorationMixin {
   late GlobalKey<OverlayState> _overlayKey;
-  List<_RouteEntry> _history = <_RouteEntry>[];
+  final _History _history = _History();
+
   /// A set for entries that are waiting to dispose until their subtrees are
   /// disposed.
   ///
@@ -3310,13 +3600,6 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
   final Queue<_NavigatorObservation> _observedRouteAdditions = Queue<_NavigatorObservation>();
   final Queue<_NavigatorObservation> _observedRouteDeletions = Queue<_NavigatorObservation>();
 
-  /// The [FocusScopeNode] for the [FocusScope] that encloses the topmost navigator.
-  @Deprecated(
-    'Use focusNode.enclosingScope! instead. '
-    'This feature was deprecated after v3.1.0-0.0.pre.'
-  )
-  FocusScopeNode get focusScopeNode => focusNode.enclosingScope!;
-
   /// The [FocusNode] for the [Focus] that encloses the routes.
   final FocusNode focusNode = FocusNode(debugLabel: 'Navigator');
 
@@ -3326,38 +3609,72 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
 
   late List<NavigatorObserver> _effectiveObservers;
 
+  bool get _usingPagesAPI => widget.pages != const <Page<dynamic>>[];
+
+  void _handleHistoryChanged() {
+    final bool navigatorCanPop = canPop();
+    late final bool routeBlocksPop;
+    if (!navigatorCanPop) {
+      final _RouteEntry? lastEntry = _lastRouteEntryWhereOrNull(_RouteEntry.isPresentPredicate);
+      routeBlocksPop = lastEntry != null
+          && lastEntry.route.popDisposition == RoutePopDisposition.doNotPop;
+    } else {
+      routeBlocksPop = false;
+    }
+    final NavigationNotification notification = NavigationNotification(
+      canHandlePop: navigatorCanPop || routeBlocksPop,
+    );
+    // Avoid dispatching a notification in the middle of a build.
+    switch (SchedulerBinding.instance.schedulerPhase) {
+      case SchedulerPhase.postFrameCallbacks:
+        notification.dispatch(context);
+      case SchedulerPhase.idle:
+      case SchedulerPhase.midFrameMicrotasks:
+      case SchedulerPhase.persistentCallbacks:
+      case SchedulerPhase.transientCallbacks:
+        SchedulerBinding.instance.addPostFrameCallback((Duration timeStamp) {
+          if (!mounted) {
+            return;
+          }
+          notification.dispatch(context);
+        }, debugLabel: 'Navigator.dispatchNotification');
+    }
+  }
+
+  bool _debugCheckPageApiParameters() {
+    if (!_usingPagesAPI) {
+      return true;
+    }
+    if (widget.pages.isEmpty) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: FlutterError(
+            'The Navigator.pages must not be empty to use the '
+                'Navigator.pages API',
+          ),
+          library: 'widget library',
+          stack: StackTrace.current,
+        ),
+      );
+    } else if ((widget.onDidRemovePage == null) == (widget.onPopPage == null)) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: FlutterError(
+            'Either onDidRemovePage or onPopPage must be provided to use the '
+            'Navigator.pages API but not both.',
+          ),
+          library: 'widget library',
+          stack: StackTrace.current,
+        ),
+      );
+    }
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
-    assert(() {
-      if (widget.pages != const <Page<dynamic>>[]) {
-        // This navigator uses page API.
-        if (widget.pages.isEmpty) {
-          FlutterError.reportError(
-            FlutterErrorDetails(
-              exception: FlutterError(
-                'The Navigator.pages must not be empty to use the '
-                'Navigator.pages API',
-              ),
-              library: 'widget library',
-              stack: StackTrace.current,
-            ),
-          );
-        } else if (widget.onPopPage == null) {
-          FlutterError.reportError(
-            FlutterErrorDetails(
-              exception: FlutterError(
-                'The Navigator.onPopPage must be provided to use the '
-                'Navigator.pages API',
-              ),
-              library: 'widget library',
-              stack: StackTrace.current,
-            ),
-          );
-        }
-      }
-      return true;
-    }());
+    assert(_debugCheckPageApiParameters());
     for (final NavigatorObserver observer in widget.observers) {
       assert(observer.navigator == null);
       NavigatorObserver._navigators[observer] = this;
@@ -3374,6 +3691,15 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
     if (widget.reportsRouteUpdateToEngine) {
       SystemNavigator.selectSingleEntryHistory();
     }
+
+    ServicesBinding.instance.accessibilityFocus.addListener(_recordLastFocus);
+    _history.addListener(_handleHistoryChanged);
+  }
+
+  // Record the last focused node in route entry.
+  void _recordLastFocus(){
+    final _RouteEntry? entry = _history.where(_RouteEntry.isPresentPredicate).lastOrNull;
+    entry?.lastFocusNode = ServicesBinding.instance.accessibilityFocus.value;
   }
 
   // Use [_nextPagelessRestorationScopeId] to get the next id.
@@ -3528,7 +3854,7 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
                   );
                 }
               }
-            });
+            }, debugLabel: 'Navigator.checkHeroControllerOwnership');
           }
           return true;
         }());
@@ -3555,35 +3881,7 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
   @override
   void didUpdateWidget(Navigator oldWidget) {
     super.didUpdateWidget(oldWidget);
-    assert(() {
-      if (widget.pages != const <Page<dynamic>>[]) {
-        // This navigator uses page API.
-        if (widget.pages.isEmpty) {
-          FlutterError.reportError(
-            FlutterErrorDetails(
-              exception: FlutterError(
-                'The Navigator.pages must not be empty to use the '
-                'Navigator.pages API',
-              ),
-              library: 'widget library',
-              stack: StackTrace.current,
-            ),
-          );
-        } else if (widget.onPopPage == null) {
-          FlutterError.reportError(
-            FlutterErrorDetails(
-              exception: FlutterError(
-                'The Navigator.onPopPage must be provided to use the '
-                'Navigator.pages API',
-              ),
-              library: 'widget library',
-              stack: StackTrace.current,
-            ),
-          );
-        }
-      }
-      return true;
-    }());
+    assert(_debugCheckPageApiParameters());
     if (oldWidget.observers != widget.observers) {
       for (final NavigatorObserver observer in oldWidget.observers) {
         NavigatorObserver._navigators[observer] = null;
@@ -3668,6 +3966,9 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
     _rawNextPagelessRestorationScopeId.dispose();
     _serializableHistory.dispose();
     userGestureInProgressNotifier.dispose();
+    ServicesBinding.instance.accessibilityFocus.removeListener(_recordLastFocus);
+    _history.removeListener(_handleHistoryChanged);
+    _history.dispose();
     super.dispose();
     // don't unlock, so that the object becomes unusable
     assert(_debugLocked);
@@ -3953,7 +4254,7 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
         pageRouteToPagelessRoutes: pageRouteToPagelessRoutes,
       ).cast<_RouteEntry>();
     }
-    _history = <_RouteEntry>[];
+    _history.clear();
     // Adds the leading pageless routes if there is any.
     if (pageRouteToPagelessRoutes.containsKey(null)) {
       _history.addAll(pageRouteToPagelessRoutes[null]!);
@@ -4082,6 +4383,9 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
           if (!canRemoveOrAdd && next != null) {
             // We aren't allowed to remove this route yet.
             break;
+          }
+          if (entry.pageBased) {
+            widget.onDidRemovePage?.call(entry.route.settings as Page<Object?>);
           }
           entry.currentState = _RouteLifecycle.dispose;
           continue;
@@ -4969,17 +5273,17 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
     return true; // there's at least two routes, so we can pop
   }
 
-  /// Consults the current route's [Route.willPop] method, and acts accordingly,
-  /// potentially popping the route as a result; returns whether the pop request
-  /// should be considered handled.
+  /// Consults the current route's [Route.popDisposition] method, and acts
+  /// accordingly, potentially popping the route as a result; returns whether
+  /// the pop request should be considered handled.
   ///
   /// {@macro flutter.widgets.navigator.maybePop}
   ///
   /// See also:
   ///
-  ///  * [Form], which provides an `onWillPop` callback that enables the form
-  ///    to veto a [pop] initiated by the app's back button.
-  ///  * [ModalRoute], which provides a `scopedWillPopCallback` that can be used
+  ///  * [Form], which provides a [Form.canPop] boolean that enables the
+  ///    form to prevent any [pop]s initiated by the app's back button.
+  ///  * [ModalRoute], which provides a `scopedOnPopCallback` that can be used
   ///    to define the route's `willPop` method.
   @optionalTypeArgs
   Future<bool> maybePop<T extends Object?>([ T? result ]) async {
@@ -4988,23 +5292,31 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
       return false;
     }
     assert(lastEntry.route._navigator == this);
-    final RoutePopDisposition disposition = await lastEntry.route.willPop(); // this is asynchronous
+
+    // TODO(justinmc): When the deprecated willPop method is removed, delete
+    // this code and use only popDisposition, below.
+    if (await lastEntry.route.willPop() == RoutePopDisposition.doNotPop) {
+      return true;
+    }
     if (!mounted) {
       // Forget about this pop, we were disposed in the meantime.
       return true;
     }
+
     final _RouteEntry? newLastEntry = _lastRouteEntryWhereOrNull(_RouteEntry.isPresentPredicate);
     if (lastEntry != newLastEntry) {
       // Forget about this pop, something happened to our history in the meantime.
       return true;
     }
-    switch (disposition) {
+
+    switch (lastEntry.route.popDisposition) {
       case RoutePopDisposition.bubble:
         return false;
       case RoutePopDisposition.pop:
         pop(result);
         return true;
       case RoutePopDisposition.doNotPop:
+        lastEntry.route.onPopInvokedWithResult(false, result);
         return true;
     }
   }
@@ -5041,12 +5353,13 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
       return true;
     }());
     final _RouteEntry entry = _history.lastWhere(_RouteEntry.isPresentPredicate);
-    if (entry.pageBased) {
-      if (widget.onPopPage!(entry.route, result) && entry.currentState == _RouteLifecycle.idle) {
+    if (entry.pageBased && widget.onPopPage != null) {
+      if (widget.onPopPage!(entry.route, result) && entry.currentState.index <= _RouteLifecycle.idle.index) {
         // The entry may have been disposed if the pop finishes synchronously.
         assert(entry.route._popCompleter.isCompleted);
         entry.currentState = _RouteLifecycle.pop;
       }
+      entry.route.onPopInvokedWithResult(true, result);
     } else {
       entry.pop<T>(result);
       assert (entry.currentState == _RouteLifecycle.pop);
@@ -5270,7 +5583,7 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
   }
 
   /// Gets first route entry satisfying the predicate, or null if not found.
-  _RouteEntry? _firstRouteEntryWhereOrNull<T>(_RouteEntryPredicate test) {
+  _RouteEntry? _firstRouteEntryWhereOrNull(_RouteEntryPredicate test) {
     for (final _RouteEntry element in _history) {
       if (test(element)) {
         return element;
@@ -5280,7 +5593,7 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
   }
 
   /// Gets last route entry satisfying the predicate, or null if not found.
-  _RouteEntry? _lastRouteEntryWhereOrNull<T>(_RouteEntryPredicate test) {
+  _RouteEntry? _lastRouteEntryWhereOrNull(_RouteEntryPredicate test) {
     _RouteEntry? result;
     for (final _RouteEntry element in _history) {
       if (test(element)) {
@@ -5294,29 +5607,46 @@ class NavigatorState extends State<Navigator> with TickerProviderStateMixin, Res
   Widget build(BuildContext context) {
     assert(!_debugLocked);
     assert(_history.isNotEmpty);
+
     // Hides the HeroControllerScope for the widget subtree so that the other
     // nested navigator underneath will not pick up the hero controller above
     // this level.
     return HeroControllerScope.none(
-      child: Listener(
-        onPointerDown: _handlePointerDown,
-        onPointerUp: _handlePointerUpOrCancel,
-        onPointerCancel: _handlePointerUpOrCancel,
-        child: AbsorbPointer(
-          absorbing: false, // it's mutated directly by _cancelActivePointers above
-          child: FocusTraversalGroup(
-            policy: FocusTraversalGroup.maybeOf(context),
-            child: Focus(
-              focusNode: focusNode,
-              autofocus: true,
-              skipTraversal: true,
-              includeSemantics: false,
-              child: UnmanagedRestorationScope(
-                bucket: bucket,
-                child: Overlay(
-                  key: _overlayKey,
-                  clipBehavior: widget.clipBehavior,
-                  initialEntries: overlay == null ?  _allRouteOverlayEntries.toList(growable: false) : const <OverlayEntry>[],
+      child: NotificationListener<NavigationNotification>(
+        onNotification: (NavigationNotification notification) {
+          // If the state of this Navigator does not change whether or not the
+          // whole framework can pop, propagate the Notification as-is.
+          if (notification.canHandlePop || !canPop()) {
+            return false;
+          }
+          // Otherwise, dispatch a new Notification with the correct canPop and
+          // stop the propagation of the old Notification.
+          const NavigationNotification nextNotification = NavigationNotification(
+            canHandlePop: true,
+          );
+          nextNotification.dispatch(context);
+          return true;
+        },
+        child: Listener(
+          onPointerDown: _handlePointerDown,
+          onPointerUp: _handlePointerUpOrCancel,
+          onPointerCancel: _handlePointerUpOrCancel,
+          child: AbsorbPointer(
+            absorbing: false, // it's mutated directly by _cancelActivePointers above
+            child: FocusTraversalGroup(
+              policy: FocusTraversalGroup.maybeOf(context),
+              child: Focus(
+                focusNode: focusNode,
+                autofocus: true,
+                skipTraversal: true,
+                includeSemantics: false,
+                child: UnmanagedRestorationScope(
+                  bucket: bucket,
+                  child: Overlay(
+                    key: _overlayKey,
+                    clipBehavior: widget.clipBehavior,
+                    initialEntries: overlay == null ?  _allRouteOverlayEntries.toList(growable: false) : const <OverlayEntry>[],
+                  ),
                 ),
               ),
             ),
@@ -5394,14 +5724,12 @@ class _NamedRestorationInformation extends _RestorationInformation {
     required this.restorationScopeId,
   }) : super(_RouteRestorationType.named);
 
-  factory _NamedRestorationInformation.fromSerializableData(List<Object?> data) {
-    assert(data.length >= 2);
-    return _NamedRestorationInformation(
-      restorationScopeId: data[0]! as int,
-      name: data[1]! as String,
-      arguments: data.length > 2 ? data[2] : null,
-    );
-  }
+  _NamedRestorationInformation.fromSerializableData(List<Object?> data)
+      : assert(data.length > 1),
+        restorationScopeId = data[0]! as int,
+        name = data[1]! as String,
+        arguments = data.elementAtOrNull(2),
+        super(_RouteRestorationType.named);
 
   @override
   List<Object> computeSerializableData() {
@@ -5432,15 +5760,12 @@ class _AnonymousRestorationInformation extends _RestorationInformation {
     required this.restorationScopeId,
   }) : super(_RouteRestorationType.anonymous);
 
-  factory _AnonymousRestorationInformation.fromSerializableData(List<Object?> data) {
-    assert(data.length > 1);
-    final RestorableRouteBuilder<Object?> routeBuilder = ui.PluginUtilities.getCallbackFromHandle(ui.CallbackHandle.fromRawHandle(data[1]! as int))! as RestorableRouteBuilder;
-    return _AnonymousRestorationInformation(
-      restorationScopeId: data[0]! as int,
-      routeBuilder: routeBuilder,
-      arguments: data.length > 2 ? data[2] : null,
-    );
-  }
+  _AnonymousRestorationInformation.fromSerializableData(List<Object?> data)
+      : assert(data.length > 1),
+        restorationScopeId = data[0]! as int,
+        routeBuilder = ui.PluginUtilities.getCallbackFromHandle(ui.CallbackHandle.fromRawHandle(data[1]! as int))! as RestorableRouteBuilder,
+        arguments = data.elementAtOrNull(2),
+        super(_RouteRestorationType.anonymous);
 
   @override
   // TODO(goderbauer): remove the kIsWeb check when https://github.com/flutter/flutter/issues/33615 is resolved.
@@ -5477,7 +5802,7 @@ class _HistoryProperty extends RestorableProperty<Map<String?, List<Object>>?> {
 
   // Updating.
 
-  void update(List<_RouteEntry> history) {
+  void update(_History history) {
     assert(isRegistered);
     final bool wasUninitialized = _pageToPagelessRoutes == null;
     bool needsSerialization = wasUninitialized;
@@ -5687,8 +6012,6 @@ typedef RouteCompletionCallback<T> = void Function(T result);
 /// {@end-tool}
 class RestorableRouteFuture<T> extends RestorableProperty<String?> {
   /// Creates a [RestorableRouteFuture].
-  ///
-  /// The [onPresent] and [navigatorFinder] arguments must not be null.
   RestorableRouteFuture({
     this.navigatorFinder = _defaultNavigatorFinder,
     required this.onPresent,
@@ -5799,4 +6122,27 @@ class RestorableRouteFuture<T> extends RestorableProperty<String?> {
   }
 
   static NavigatorState _defaultNavigatorFinder(BuildContext context) => Navigator.of(context);
+}
+
+/// A notification that a change in navigation has taken place.
+///
+/// Specifically, this notification indicates that at least one of the following
+/// has occurred:
+///
+///  * That route stack of a [Navigator] has changed in any way.
+///  * The ability to pop has changed, such as controlled by [PopScope].
+class NavigationNotification extends Notification {
+  /// Creates a notification that some change in navigation has happened.
+  const NavigationNotification({
+    required this.canHandlePop,
+  });
+
+  /// Indicates that the originator of this [Notification] is capable of
+  /// handling a navigation pop.
+  final bool canHandlePop;
+
+  @override
+  String toString() {
+    return 'NavigationNotification canHandlePop: $canHandlePop';
+  }
 }

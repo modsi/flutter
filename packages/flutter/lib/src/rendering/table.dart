@@ -132,8 +132,6 @@ class IntrinsicColumnWidth extends TableColumnWidth {
 /// This is the cheapest way to size a column.
 class FixedColumnWidth extends TableColumnWidth {
   /// Creates a column width based on a fixed number of logical pixels.
-  ///
-  /// The [value] argument must not be null.
   const FixedColumnWidth(this.value);
 
   /// The width the column should occupy in logical pixels.
@@ -159,8 +157,6 @@ class FixedColumnWidth extends TableColumnWidth {
 class FractionColumnWidth extends TableColumnWidth {
   /// Creates a column width based on a fraction of the table's constraints'
   /// maxWidth.
-  ///
-  /// The [value] argument must not be null.
   const FractionColumnWidth(this.value);
 
   /// The fraction of the table's constraints' maxWidth that this column should
@@ -197,8 +193,6 @@ class FractionColumnWidth extends TableColumnWidth {
 class FlexColumnWidth extends TableColumnWidth {
   /// Creates a column width based on a fraction of the remaining space once all
   /// the other columns have been laid out.
-  ///
-  /// The [value] argument must not be null.
   const FlexColumnWidth([this.value = 1.0]);
 
   /// The fraction of the remaining space once all the other columns have
@@ -263,12 +257,11 @@ class MaxColumnWidth extends TableColumnWidth {
   @override
   double? flex(Iterable<RenderBox> cells) {
     final double? aFlex = a.flex(cells);
-    if (aFlex == null) {
-      return b.flex(cells);
-    }
     final double? bFlex = b.flex(cells);
-    if (bFlex == null) {
-      return null;
+    if (aFlex == null) {
+      return bFlex;
+    } else if (bFlex == null) {
+      return aFlex;
     }
     return math.max(aFlex, bFlex);
   }
@@ -316,12 +309,11 @@ class MinColumnWidth extends TableColumnWidth {
   @override
   double? flex(Iterable<RenderBox> cells) {
     final double? aFlex = a.flex(cells);
-    if (aFlex == null) {
-      return b.flex(cells);
-    }
     final double? bFlex = b.flex(cells);
-    if (bFlex == null) {
-      return null;
+    if (aFlex == null) {
+      return bFlex;
+    } else if (bFlex == null) {
+      return aFlex;
     }
     return math.min(aFlex, bFlex);
   }
@@ -355,7 +347,10 @@ enum TableCellVerticalAlignment {
 
   /// Cells with this alignment are sized to be as tall as the row, then made to fit the row.
   /// If all the cells have this alignment, then the row will have zero height.
-  fill
+  fill,
+
+  /// Cells with this alignment are sized to be the same height as the tallest cell in the row.
+  intrinsicHeight
 }
 
 /// A table where the columns and rows are sized to fit the contents of the cells.
@@ -371,8 +366,6 @@ class RenderTable extends RenderBox {
   ///  * `children` must either be null or contain lists of all the same length.
   ///    if `children` is not null, then `rows` must be null.
   ///  * [columnWidths] may be null, in which case it defaults to an empty map.
-  ///  * [defaultColumnWidth] must not be null.
-  ///  * [configuration] must not be null (but has a default value).
   RenderTable({
     int? columns,
     int? rows,
@@ -807,13 +800,14 @@ class RenderTable extends RenderBox {
 
   @override
   double computeMaxIntrinsicHeight(double width) {
-    return computeMinIntrinsicHeight(width);
+    return getMinIntrinsicHeight(width);
   }
 
   double? _baselineDistance;
   @override
   double? computeDistanceToActualBaseline(TextBaseline baseline) {
-    // returns the baseline of the first cell that has a baseline in the first row
+    // returns the baseline offset of the cell in the first row with
+    // the lowest baseline, and uses `TableCellVerticalAlignment.baseline`.
     assert(!debugNeedsLayout);
     return _baselineDistance;
   }
@@ -1034,7 +1028,38 @@ class RenderTable extends RenderBox {
   }
 
   @override
-  Size computeDryLayout(BoxConstraints constraints) {
+  double? computeDryBaseline(covariant BoxConstraints constraints, TextBaseline baseline) {
+    if (rows * columns == 0) {
+      return null;
+    }
+    final List<double> widths = _computeColumnWidths(constraints);
+    double? baselineOffset;
+    for (int col = 0; col < columns; col += 1) {
+      final RenderBox? child = _children[col];
+      final BoxConstraints childConstraints = BoxConstraints.tightFor(width: widths[col]);
+      if (child == null) {
+        continue;
+      }
+      final TableCellParentData childParentData = child.parentData! as TableCellParentData;
+      final double? childBaseline = switch (childParentData.verticalAlignment ?? defaultVerticalAlignment) {
+        TableCellVerticalAlignment.baseline => child.getDryBaseline(childConstraints, baseline),
+        TableCellVerticalAlignment.baseline ||
+        TableCellVerticalAlignment.top ||
+        TableCellVerticalAlignment.middle ||
+        TableCellVerticalAlignment.bottom ||
+        TableCellVerticalAlignment.fill ||
+        TableCellVerticalAlignment.intrinsicHeight => null,
+      };
+      if (childBaseline != null && (baselineOffset == null || baselineOffset < childBaseline)) {
+        baselineOffset = childBaseline;
+      }
+    }
+    return baselineOffset;
+  }
+
+  @override
+  @protected
+  Size computeDryLayout(covariant BoxConstraints constraints) {
     if (rows * columns == 0) {
       return constraints.constrain(Size.zero);
     }
@@ -1057,6 +1082,7 @@ class RenderTable extends RenderBox {
             case TableCellVerticalAlignment.top:
             case TableCellVerticalAlignment.middle:
             case TableCellVerticalAlignment.bottom:
+            case TableCellVerticalAlignment.intrinsicHeight:
               final Size childSize = child.getDryLayout(BoxConstraints.tightFor(width: widths[x]));
               rowHeight = math.max(rowHeight, childSize.height);
             case TableCellVerticalAlignment.fill:
@@ -1135,6 +1161,7 @@ class RenderTable extends RenderBox {
             case TableCellVerticalAlignment.top:
             case TableCellVerticalAlignment.middle:
             case TableCellVerticalAlignment.bottom:
+            case TableCellVerticalAlignment.intrinsicHeight:
               child.layout(BoxConstraints.tightFor(width: widths[x]), parentUsesSize: true);
               rowHeight = math.max(rowHeight, child.size.height);
             case TableCellVerticalAlignment.fill:
@@ -1163,6 +1190,7 @@ class RenderTable extends RenderBox {
             case TableCellVerticalAlignment.bottom:
               childParentData.offset = Offset(positions[x], rowTop + rowHeight - child.size.height);
             case TableCellVerticalAlignment.fill:
+            case TableCellVerticalAlignment.intrinsicHeight:
               child.layout(BoxConstraints.tightFor(width: widths[x], height: rowHeight));
               childParentData.offset = Offset(positions[x], rowTop);
           }
@@ -1263,19 +1291,13 @@ class RenderTable extends RenderBox {
       return <DiagnosticsNode>[DiagnosticsNode.message('table is empty')];
     }
 
-    final List<DiagnosticsNode> children = <DiagnosticsNode>[];
-    for (int y = 0; y < rows; y += 1) {
-      for (int x = 0; x < columns; x += 1) {
-        final int xy = x + y * columns;
-        final RenderBox? child = _children[xy];
-        final String name = 'child ($x, $y)';
-        if (child != null) {
-          children.add(child.toDiagnosticsNode(name: name));
-        } else {
-          children.add(DiagnosticsProperty<Object>(name, null, ifNull: 'is null', showSeparator: false));
-        }
-      }
-    }
-    return children;
+    return <DiagnosticsNode>[
+      for (int y = 0; y < rows; y += 1)
+        for (int x = 0; x < columns; x += 1)
+          if (_children[x + y * columns] case final RenderBox child)
+            child.toDiagnosticsNode(name: 'child ($x, $y)')
+          else
+            DiagnosticsProperty<Object>('child ($x, $y)', null, ifNull: 'is null', showSeparator: false),
+    ];
   }
 }

@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'package:flutter/material.dart';
+library;
+
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
@@ -94,6 +97,9 @@ class CupertinoAdaptiveTextSelectionToolbar extends StatelessWidget {
     required VoidCallback? onCut,
     required VoidCallback? onPaste,
     required VoidCallback? onSelectAll,
+    required VoidCallback? onLookUp,
+    required VoidCallback? onSearchWeb,
+    required VoidCallback? onShare,
     required VoidCallback? onLiveTextInput,
     required this.anchors,
   }) : children = null,
@@ -103,6 +109,9 @@ class CupertinoAdaptiveTextSelectionToolbar extends StatelessWidget {
          onCut: onCut,
          onPaste: onPaste,
          onSelectAll: onSelectAll,
+         onLookUp: onLookUp,
+         onSearchWeb: onSearchWeb,
+         onShare: onShare,
          onLiveTextInput: onLiveTextInput
        );
 
@@ -146,6 +155,7 @@ class CupertinoAdaptiveTextSelectionToolbar extends StatelessWidget {
          selectionGeometry: selectionGeometry,
          onCopy: onCopy,
          onSelectAll: onSelectAll,
+         onShare: null, // See https://github.com/flutter/flutter/issues/141775.
        );
 
   /// {@macro flutter.material.AdaptiveTextSelectionToolbar.anchors}

@@ -253,6 +253,7 @@ void main() {
 
   testWidgets('Can use listener for relayout', (WidgetTester tester) async {
     final ValueNotifier<Size> size = ValueNotifier<Size>(const Size(100.0, 200.0));
+    addTearDown(size.dispose);
 
     await tester.pumpWidget(
       Center(
@@ -372,13 +373,13 @@ void main() {
           '   in its parent data.\n'
           '   The following child has no ID: RenderConstrainedBox#00000 NEEDS-LAYOUT NEEDS-PAINT:\n'
           '     creator: ConstrainedBox ← Container ← LayoutWithMissingId ←\n'
-          '       CustomMultiChildLayout ← Center ← MediaQuery ←\n'
-          '       _MediaQueryFromView ← _ViewScope ← View-[GlobalObjectKey\n'
-          '       TestFlutterView#00000] ← [root]\n'
+          '       CustomMultiChildLayout ← Center ← _FocusInheritedScope ←\n'
+          '       _FocusScopeWithExternalFocusNode ← _FocusInheritedScope ← Focus\n'
+          '       ← FocusTraversalGroup ← MediaQuery ← _MediaQueryFromView ← ⋯\n'
           '     parentData: offset=Offset(0.0, 0.0); id=null\n'
           '     constraints: MISSING\n'
           '     size: MISSING\n'
-          '     additionalConstraints: BoxConstraints(w=100.0, 0.0<=h<=Infinity)\n',
+          '     additionalConstraints: BoxConstraints(w=100.0, 0.0<=h<=Infinity)\n'
       );
     });
 

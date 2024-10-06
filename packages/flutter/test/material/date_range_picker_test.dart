@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'feedback_tester.dart';
+import '../widgets/feedback_tester.dart';
 
 void main() {
   late DateTime firstDate;
@@ -52,6 +52,9 @@ void main() {
     helpText = null;
     saveText = null;
   });
+
+  const Size wideWindowSize = Size(1920.0, 1080.0);
+  const Size narrowWindowSize = Size(1070.0, 1770.0);
 
   Future<void> preparePicker(
     WidgetTester tester,
@@ -132,22 +135,21 @@ void main() {
       final Offset entryButtonBottomLeft = tester.getBottomLeft(
         find.widgetWithIcon(IconButton, Icons.edit_outlined),
       );
-      expect(
-        saveButtonBottomLeft.dx,
-        const bool.hasEnvironment('SKPARAGRAPH_REMOVE_ROUNDING_HACK') ? moreOrLessEquals(711.6, epsilon: 1e-5) : (800 - 89.0),
-      );
-      expect(saveButtonBottomLeft.dy, helpTextTopLeft.dy);
+      expect(saveButtonBottomLeft.dx, moreOrLessEquals(711.6, epsilon: 1e-5));
+      if (!kIsWeb || isSkiaWeb) { // https://github.com/flutter/flutter/issues/99933
+        expect(saveButtonBottomLeft.dy, helpTextTopLeft.dy);
+      }
       expect(entryButtonBottomLeft.dx, saveButtonBottomLeft.dx - 48.0);
-      expect(entryButtonBottomLeft.dy, helpTextTopLeft.dy);
+      if (!kIsWeb || isSkiaWeb) { // https://github.com/flutter/flutter/issues/99933
+        expect(entryButtonBottomLeft.dy, helpTextTopLeft.dy);
+      }
 
       // Test help text position.
       final Offset helpTextBottomLeft = tester.getBottomLeft(helpText);
       expect(helpTextBottomLeft.dx, 72.0);
-      // TODO(tahatesser): https://github.com/flutter/flutter/issues/99933
-      // A bug in the HTML renderer and/or Chrome 96+ causes a
-      // discrepancy in the paragraph height.
-      const bool hasIssue99933 = kIsWeb && !bool.fromEnvironment('FLUTTER_WEB_USE_SKIA');
-      expect(helpTextBottomLeft.dy, closeButtonBottomRight.dy + 20.0 + (hasIssue99933 ? 1.0 : 0.0));
+      if (!kIsWeb || isSkiaWeb) { // https://github.com/flutter/flutter/issues/99933
+        expect(helpTextBottomLeft.dy, closeButtonBottomRight.dy + 20.0);
+      }
 
       // Test the header position.
       final Offset firstDateHeaderTopLeft = tester.getTopLeft(firstDateHeaderText);
@@ -180,7 +182,7 @@ void main() {
         matching: find.byType(Material),
       ).first);
 
-      expect(dialogMaterial.color, theme.colorScheme.surface);
+      expect(dialogMaterial.color, theme.colorScheme.surfaceContainerHigh);
       expect(dialogMaterial.shadowColor, Colors.transparent);
       expect(dialogMaterial.surfaceTintColor, Colors.transparent);
       expect(dialogMaterial.elevation, 0.0);
@@ -200,7 +202,7 @@ void main() {
         matching: find.byType(Material),
       ).first);
 
-      expect(dialogMaterial.color, theme.colorScheme.surface);
+      expect(dialogMaterial.color, theme.colorScheme.surfaceContainerHigh);
       expect(dialogMaterial.shadowColor, Colors.transparent);
       expect(dialogMaterial.surfaceTintColor, Colors.transparent);
       expect(dialogMaterial.elevation, 0.0);
@@ -264,6 +266,16 @@ void main() {
     await preparePicker(tester, (Future<DateTimeRange?> range) async {
       expect(find.text(helpText!), findsOneWidget);
       expect(find.text(saveText!), findsOneWidget);
+    });
+  });
+
+  testWidgets('Long helpText does not cutoff the save button', (WidgetTester tester) async {
+    helpText = 'long helpText' * 100;
+    saveText = 'make it so';
+    await preparePicker(tester, (Future<DateTimeRange?> range) async {
+      expect(find.text(helpText!), findsOneWidget);
+      expect(find.text(saveText!), findsOneWidget);
+      expect(tester.takeException(), null);
     });
   });
 
@@ -797,9 +809,9 @@ void main() {
           matching: find.byType(Material),
         ).first);
 
-        expect(dialogMaterial.color, theme.colorScheme.surface);
+        expect(dialogMaterial.color, theme.colorScheme.surfaceContainerHigh);
         expect(dialogMaterial.shadowColor, Colors.transparent);
-        expect(dialogMaterial.surfaceTintColor, theme.colorScheme.surfaceTint);
+        expect(dialogMaterial.surfaceTintColor, Colors.transparent);
         expect(dialogMaterial.elevation, 6.0);
         expect(
           dialogMaterial.shape,
@@ -1059,6 +1071,22 @@ void main() {
       // Test the end date text field
       testInputDecorator(tester.widget(borderContainers.last), border, Colors.transparent);
     });
+
+    // This is a regression test for https://github.com/flutter/flutter/issues/131989.
+    testWidgets('Dialog contents do not overflow when resized from landscape to portrait',
+      (WidgetTester tester) async {
+        addTearDown(tester.view.reset);
+        // Initial window size is wide for landscape mode.
+        tester.view.physicalSize = wideWindowSize;
+        tester.view.devicePixelRatio = 1.0;
+
+        await preparePicker(tester, (Future<DateTimeRange?> range) async {
+          // Change window size to narrow for portrait mode.
+          tester.view.physicalSize = narrowWindowSize;
+          await tester.pump();
+          expect(tester.takeException(), null);
+      });
+    });
   });
 
   testWidgets('DatePickerDialog is state restorable', (WidgetTester tester) async {
@@ -1291,6 +1319,7 @@ void main() {
           matchesSemantics(
             label: '30, Saturday, January 30, 2016, Today',
             hasTapAction: true,
+            hasFocusAction: true,
             isFocusable: true,
           ),
         );
@@ -1559,7 +1588,7 @@ void main() {
         expect(appBar.actionsIconTheme, iconTheme);
         expect(appBar.elevation, null);
         expect(appBar.scrolledUnderElevation, null);
-        expect(appBar.backgroundColor, null);
+        expect(appBar.backgroundColor, theme.colorScheme.primary);
       });
     });
 
@@ -1648,6 +1677,14 @@ class _RestorableDateRangePickerDialogTestWidgetState extends State<_RestorableD
       );
     },
   );
+
+  @override
+  void dispose() {
+    _startDate.dispose();
+    _endDate.dispose();
+    _restorableDateRangePickerRouteFuture.dispose();
+    super.dispose();
+  }
 
   @override
   void restoreState(RestorationBucket? oldBucket, bool initialRestore) {

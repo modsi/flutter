@@ -169,9 +169,8 @@ class Ink extends StatefulWidget {
   /// properties of the [DecorationImage] of that [BoxDecoration] are set
   /// according to the arguments passed to this method.
   ///
-  /// The `image` argument must not be null. If there is no
-  /// intention to render anything on this image, consider using a
-  /// [Container] with a [BoxDecoration.image] instead. The `onImageError`
+  /// If there is no intention to render anything on this image, consider using
+  /// a [Container] with a [BoxDecoration.image] instead. The `onImageError`
   /// argument may be provided to listen for errors when resolving the image.
   ///
   /// The `alignment`, `repeat`, and `matchTextDirection` arguments must not
@@ -237,14 +236,12 @@ class Ink extends StatefulWidget {
   final double? height;
 
   EdgeInsetsGeometry get _paddingIncludingDecoration {
-    if (decoration == null) {
-      return padding ?? EdgeInsets.zero;
-    }
-    final EdgeInsetsGeometry decorationPadding = decoration!.padding;
-    if (padding == null) {
-      return decorationPadding;
-    }
-    return padding!.add(decorationPadding);
+    return switch ((padding, decoration?.padding)) {
+      (null, null) => EdgeInsets.zero,
+      (null, final EdgeInsetsGeometry padding) => padding,
+      (final EdgeInsetsGeometry padding, null) => padding,
+      _ => padding!.add(decoration!.padding),
+    };
   }
 
   @override

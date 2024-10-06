@@ -77,18 +77,26 @@ void main() {
       final ProcessManager processManager = FakeProcessManager.any();
       final Xcode xcode = Xcode.test(
         processManager: processManager,
-        xcodeProjectInterpreter: XcodeProjectInterpreter.test(processManager: processManager, version: Version(12, 4, null)),
+        xcodeProjectInterpreter: XcodeProjectInterpreter.test(processManager: processManager, version: Version(14, 4, null)),
       );
       final XcodeValidator validator = XcodeValidator(
         xcode: xcode,
         userMessages: UserMessages(),
         iosSimulatorUtils: FakeIOSSimulatorUtils(),
       );
+<<<<<<< HEAD
+      final XcodeValidator validator = XcodeValidator(
+        xcode: xcode,
+        userMessages: UserMessages(),
+        iosSimulatorUtils: FakeIOSSimulatorUtils(),
+      );
+=======
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
       final ValidationResult result = await validator.validate();
       expect(result.type, ValidationType.partial);
       expect(result.messages.last.type, ValidationMessageType.hint);
-      expect(result.messages.last.message, contains('Flutter recommends a minimum Xcode version of 13'));
-    }, skip: true); // [intended] Unskip and update when minimum and required check versions diverge.
+      expect(result.messages.last.message, contains('Flutter recommends a minimum Xcode version of 15'));
+    }, skip: false); // [intended] Skip this test when minimum and required check versions converge.
 
     testWithoutContext('Emits partial status when Xcode EULA not signed', () async {
       final ProcessManager processManager = FakeProcessManager.list(<FakeCommand>[

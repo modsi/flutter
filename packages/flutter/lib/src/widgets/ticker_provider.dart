@@ -20,8 +20,6 @@ export 'package:flutter/scheduler.dart' show TickerProvider;
 /// [TickerProviderStateMixin] or a [SingleTickerProviderStateMixin].
 class TickerMode extends StatefulWidget {
   /// Creates a widget that enables or disables tickers.
-  ///
-  /// The [enabled] argument must not be null.
   const TickerMode({
     super.key,
     required this.enabled,
@@ -257,18 +255,13 @@ mixin SingleTickerProviderStateMixin<T extends StatefulWidget> on State<T> imple
   @override
   void debugFillProperties(DiagnosticPropertiesBuilder properties) {
     super.debugFillProperties(properties);
-    String? tickerDescription;
-    if (_ticker != null) {
-      if (_ticker!.isActive && _ticker!.muted) {
-        tickerDescription = 'active but muted';
-      } else if (_ticker!.isActive) {
-        tickerDescription = 'active';
-      } else if (_ticker!.muted) {
-        tickerDescription = 'inactive and muted';
-      } else {
-        tickerDescription = 'inactive';
-      }
-    }
+    final String? tickerDescription = switch ((_ticker?.isActive, _ticker?.muted)) {
+      (true,  true)  => 'active but muted',
+      (true,  _)     => 'active',
+      (false, true)  => 'inactive and muted',
+      (false, _)     => 'inactive',
+      (null,  _)     => null,
+    };
     properties.add(DiagnosticsProperty<Ticker>('ticker', _ticker, description: tickerDescription, showSeparator: false, defaultValue: null));
   }
 }

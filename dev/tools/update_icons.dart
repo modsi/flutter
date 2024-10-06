@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // Regenerates a Dart file with a class containing IconData constants.
-// See https://github.com/flutter/flutter/wiki/Updating-Material-Design-Fonts-&-Icons
+// See https://github.com/flutter/flutter/blob/main/docs/libraries/material/Updating-Material-Design-Fonts-%26-Icons.md
 // Should be idempotent with:
 // dart dev/tools/update_icons.dart --new-codepoints bin/cache/artifacts/material_fonts/codepoints
 
@@ -150,7 +150,7 @@ const Set<String> _iconsMirroredWhenRTL = <String>{
   'navigate_next',
   'next_week',
   'note',
-  'open_in_new',
+  'open_in',
   'playlist_add',
   'queue_music',
   'redo',
@@ -388,15 +388,10 @@ bool testIsSuperset(Map<String, String> newCodepoints, Map<String, String> oldCo
 @visibleForTesting
 bool testIsStable(Map<String, String> newCodepoints, Map<String, String> oldCodepoints) {
   final int oldCodepointsCount = oldCodepoints.length;
-  final List<String> unstable = <String>[];
-
-  oldCodepoints.forEach((String key, String value) {
-    if (newCodepoints.containsKey(key)) {
-      if (value != newCodepoints[key]) {
-        unstable.add(key);
-      }
-    }
-  });
+  final List<String> unstable = <String>[
+    for (final MapEntry<String, String>(:String key, :String value) in oldCodepoints.entries)
+      if (newCodepoints.containsKey(key) && value != newCodepoints[key]) key,
+  ];
 
   if (unstable.isNotEmpty) {
     stderr.writeln('❌ out of $oldCodepointsCount existing codepoints, ${unstable.length} were unstable: $unstable');
@@ -513,12 +508,14 @@ class Icon {
 
   String get usage => 'Icon($className.$flutterId),';
 
-  String get mirroredInRTL => _iconsMirroredWhenRTL.contains(shortId)
-      ? ', matchTextDirection: true'
-      : '';
+  bool get isMirroredInRTL {
+    // Remove common suffixes (e.g. "_new" or "_alt") from the shortId.
+    final String normalizedShortId = shortId.replaceAll(RegExp(r'_(new|alt|off|on)$'), '');
+    return _iconsMirroredWhenRTL.any((String shortIdMirroredWhenRTL) => normalizedShortId == shortIdMirroredWhenRTL);
+  }
 
   String get declaration =>
-      "static const IconData $flutterId = IconData(0x$hexCodepoint, fontFamily: '$fontFamily'$mirroredInRTL);";
+      "static const IconData $flutterId = IconData(0x$hexCodepoint, fontFamily: '$fontFamily'${isMirroredInRTL ? ', matchTextDirection: true' : ''});";
 
   String get fullDeclaration => '''
 

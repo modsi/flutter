@@ -98,7 +98,6 @@ void main() {
         artifacts: Artifacts.test(),
         logger: BufferLogger.test(),
         flutterVersion: FakeFlutterVersion(),
-        operatingSystemUtils: FakeOperatingSystemUtils(),
       );
       logLines = <String>[];
       device.getLogReader().logLines.listen(logLines.add);
@@ -160,11 +159,16 @@ Hello!
 ''',
       ));
 
-      final LaunchResult result = await device.startApp(app,
+      final LaunchResult result = await device.startApp(
+        app,
         mainPath: mainPath,
-        debuggingOptions: DebuggingOptions.enabled(const BuildInfo(BuildMode.debug, null, treeShakeIcons: false)),
+        debuggingOptions: DebuggingOptions.enabled(const BuildInfo(
+          BuildMode.debug,
+          null,
+          treeShakeIcons: false,
+          packageConfigPath: '.dart_tool/package_config.json',
+        )),
       );
-
       expect(result.started, isTrue);
       expect(result.vmServiceUri, vmServiceUri);
       expect(logLines.last, 'Hello!');
@@ -213,7 +217,6 @@ FlutterTesterDevices setUpFlutterTesterDevices() {
     processManager: FakeProcessManager.any(),
     fileSystem: MemoryFileSystem.test(),
     flutterVersion: FakeFlutterVersion(),
-    operatingSystemUtils: FakeOperatingSystemUtils(),
   );
 }
 

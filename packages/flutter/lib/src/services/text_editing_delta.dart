@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'text_input.dart';
+library;
+
 import 'dart:ui' show TextRange;
 
 import 'package:flutter/foundation.dart';
@@ -15,13 +18,11 @@ export 'text_editing.dart' show TextSelection;
 export 'text_input.dart' show TextEditingValue;
 
 TextAffinity? _toTextAffinity(String? affinity) {
-  switch (affinity) {
-    case 'TextAffinity.downstream':
-      return TextAffinity.downstream;
-    case 'TextAffinity.upstream':
-      return TextAffinity.upstream;
-  }
-  return null;
+  return switch (affinity) {
+    'TextAffinity.downstream' => TextAffinity.downstream,
+    'TextAffinity.upstream'   => TextAffinity.upstream,
+    _ => null,
+  };
 }
 
 // Replaces a range of text in the original string with the text given in the
@@ -56,10 +57,6 @@ bool _debugTextRangeIsValid(TextRange range, String text) {
 ///    to true.
 abstract class TextEditingDelta with Diagnosticable {
   /// Creates a delta for a given change to the editing state.
-  ///
-  /// {@template flutter.services.TextEditingDelta}
-  /// The [oldText], [selection], and [composing] arguments must not be null.
-  /// {@endtemplate}
   const TextEditingDelta({
     required this.oldText,
     required this.selection,
@@ -251,8 +248,6 @@ abstract class TextEditingDelta with Diagnosticable {
 class TextEditingDeltaInsertion extends TextEditingDelta {
   /// Creates an insertion delta for a given change to the editing state.
   ///
-  /// {@macro flutter.services.TextEditingDelta}
-  ///
   /// {@template flutter.services.TextEditingDelta.optIn}
   /// See also:
   ///
@@ -304,8 +299,6 @@ class TextEditingDeltaInsertion extends TextEditingDelta {
 class TextEditingDeltaDeletion extends TextEditingDelta {
   /// Creates a deletion delta for a given change to the editing state.
   ///
-  /// {@macro flutter.services.TextEditingDelta}
-  ///
   /// {@macro flutter.services.TextEditingDelta.optIn}
   const TextEditingDeltaDeletion({
     required super.oldText,
@@ -355,8 +348,6 @@ class TextEditingDeltaReplacement extends TextEditingDelta {
   ///
   /// A replacement can occur in cases such as auto-correct, suggestions, and
   /// when a selection is replaced by a single character.
-  ///
-  /// {@macro flutter.services.TextEditingDelta}
   ///
   /// {@macro flutter.services.TextEditingDelta.optIn}
   const TextEditingDeltaReplacement({
@@ -412,8 +403,6 @@ class TextEditingDeltaNonTextUpdate extends TextEditingDelta {
   /// A situation where this delta would be created is when dragging the selection
   /// handles. There are no changes to the text, but there are updates to the selection
   /// and potentially the composing region as well.
-  ///
-  /// {@macro flutter.services.TextEditingDelta}
   ///
   /// {@macro flutter.services.TextEditingDelta.optIn}
   const TextEditingDeltaNonTextUpdate({

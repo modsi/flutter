@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 
 import 'adaptive_text_selection_toolbar.dart';
 import 'input_decorator.dart';
+import 'material_state.dart';
 import 'text_field.dart';
 import 'theme.dart';
 
@@ -80,6 +81,13 @@ export 'package:flutter/services.dart' show SmartDashesType, SmartQuotesType;
 /// ** See code in examples/api/lib/material/text_form_field/text_form_field.1.dart **
 /// {@end-tool}
 ///
+/// {@tool dartpad}
+/// This example shows how to force an error text to the field after making
+/// an asynchronous call.
+///
+/// ** See code in examples/api/lib/material/text_form_field/text_form_field.2.dart **
+/// {@end-tool}
+///
 /// See also:
 ///
 ///  * <https://material.io/design/components/text-fields.html>
@@ -87,7 +95,7 @@ export 'package:flutter/services.dart' show SmartDashesType, SmartQuotesType;
 ///    integration.
 ///  * [InputDecorator], which shows the labels and other visual elements that
 ///    surround the actual text editing widget.
-///  * Learn how to use a [TextEditingController] in one of our [cookbook recipes](https://flutter.dev/docs/cookbook/forms/text-field-changes#2-use-a-texteditingcontroller).
+///  * Learn how to use a [TextEditingController] in one of our [cookbook recipes](https://docs.flutter.dev/cookbook/forms/text-field-changes#2-use-a-texteditingcontroller).
 class TextFormField extends FormField<String> {
   /// Creates a [FormField] that contains a [TextField].
   ///
@@ -100,9 +108,11 @@ class TextFormField extends FormField<String> {
   /// and [TextField.new], the constructor.
   TextFormField({
     super.key,
+    this.groupId = EditableText,
     this.controller,
     String? initialValue,
     FocusNode? focusNode,
+    super.forceErrorText,
     InputDecoration? decoration = const InputDecoration(),
     TextInputType? keyboardType,
     TextCapitalization textCapitalization = TextCapitalization.none,
@@ -131,8 +141,9 @@ class TextFormField extends FormField<String> {
     int? minLines,
     bool expands = false,
     int? maxLength,
-    ValueChanged<String>? onChanged,
+    this.onChanged,
     GestureTapCallback? onTap,
+    bool onTapAlwaysCalled = false,
     TapRegionCallback? onTapOutside,
     VoidCallback? onEditingComplete,
     ValueChanged<String>? onFieldSubmitted,
@@ -140,10 +151,12 @@ class TextFormField extends FormField<String> {
     super.validator,
     List<TextInputFormatter>? inputFormatters,
     bool? enabled,
+    bool? ignorePointers,
     double cursorWidth = 2.0,
     double? cursorHeight,
     Radius? cursorRadius,
     Color? cursorColor,
+    Color? cursorErrorColor,
     Brightness? keyboardAppearance,
     EdgeInsets scrollPadding = const EdgeInsets.all(20.0),
     bool? enableInteractiveSelection,
@@ -166,6 +179,7 @@ class TextFormField extends FormField<String> {
     ui.BoxWidthStyle selectionWidthStyle = ui.BoxWidthStyle.tight,
     DragStartBehavior dragStartBehavior = DragStartBehavior.start,
     ContentInsertionConfiguration? contentInsertionConfiguration,
+    MaterialStatesController? statesController,
     Clip clipBehavior = Clip.hardEdge,
     bool scribbleEnabled = true,
     bool canRequestFocus = true,
@@ -193,13 +207,12 @@ class TextFormField extends FormField<String> {
                .applyDefaults(Theme.of(field.context).inputDecorationTheme);
            void onChangedHandler(String value) {
              field.didChange(value);
-             if (onChanged != null) {
-               onChanged(value);
-             }
+             onChanged?.call(value);
            }
            return UnmanagedRestorationScope(
              bucket: field.bucket,
              child: TextField(
+               groupId: groupId,
                restorationId: restorationId,
                controller: state._effectiveController,
                focusNode: focusNode,
@@ -213,6 +226,7 @@ class TextFormField extends FormField<String> {
                textDirection: textDirection,
                textCapitalization: textCapitalization,
                autofocus: autofocus,
+               statesController: statesController,
                toolbarOptions: toolbarOptions,
                readOnly: readOnly,
                showCursor: showCursor,
@@ -229,15 +243,18 @@ class TextFormField extends FormField<String> {
                maxLength: maxLength,
                onChanged: onChangedHandler,
                onTap: onTap,
+               onTapAlwaysCalled: onTapAlwaysCalled,
                onTapOutside: onTapOutside,
                onEditingComplete: onEditingComplete,
                onSubmitted: onFieldSubmitted,
                inputFormatters: inputFormatters,
                enabled: enabled ?? decoration?.enabled ?? true,
+               ignorePointers: ignorePointers,
                cursorWidth: cursorWidth,
                cursorHeight: cursorHeight,
                cursorRadius: cursorRadius,
                cursorColor: cursorColor,
+               cursorErrorColor: cursorErrorColor,
                scrollPadding: scrollPadding,
                scrollPhysics: scrollPhysics,
                keyboardAppearance: keyboardAppearance,
@@ -271,6 +288,15 @@ class TextFormField extends FormField<String> {
   /// If null, this widget will create its own [TextEditingController] and
   /// initialize its [TextEditingController.text] with [initialValue].
   final TextEditingController? controller;
+
+  /// {@macro flutter.widgets.editableText.groupId}
+  final Object groupId;
+
+  /// {@template flutter.material.TextFormField.onChanged}
+  /// Called when the user initiates a change to the TextField's
+  /// value: when they have inserted or deleted text or reset the form.
+  /// {@endtemplate}
+  final ValueChanged<String>? onChanged;
 
   static Widget _defaultContextMenuBuilder(BuildContext context, EditableTextState editableTextState) {
     return AdaptiveTextSelectionToolbar.editableText(
@@ -365,10 +391,11 @@ class _TextFormFieldState extends FormFieldState<String> {
 
   @override
   void reset() {
-    // setState will be called in the superclass, so even though state is being
-    // manipulated, no setState call is needed here.
+    // Set the controller value before calling super.reset() to let
+    // _handleControllerChanged suppress the change.
     _effectiveController.text = widget.initialValue ?? '';
     super.reset();
+    _textFormField.onChanged?.call(_effectiveController.text);
   }
 
   void _handleControllerChanged() {

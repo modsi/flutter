@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'package:flutter/widgets.dart';
+///
+/// @docImport 'multitap.dart';
+library;
 
 import 'package:flutter/foundation.dart';
 
@@ -26,8 +30,6 @@ export 'events.dart' show PointerCancelEvent, PointerDownEvent, PointerEvent, Po
 ///  * [TapGestureRecognizer], which passes this information to one of its callbacks.
 class TapDownDetails {
   /// Creates details for a [GestureTapDownCallback].
-  ///
-  /// The [globalPosition] argument must not be null.
   TapDownDetails({
     this.globalPosition = Offset.zero,
     Offset? localPosition,
@@ -65,7 +67,7 @@ typedef GestureTapDownCallback = void Function(TapDownDetails details);
 ///  * [GestureDetector.onTapUp], which receives this information.
 ///  * [TapGestureRecognizer], which passes this information to one of its callbacks.
 class TapUpDetails {
-  /// The [globalPosition] argument must not be null.
+  /// Creates a [TapUpDetails] data object.
   TapUpDetails({
     required this.kind,
     this.globalPosition = Offset.zero,

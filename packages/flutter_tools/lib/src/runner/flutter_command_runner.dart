@@ -6,17 +6,18 @@ import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 import 'package:completion/completion.dart';
 import 'package:file/file.dart';
+import 'package:unified_analytics/unified_analytics.dart';
 
 import '../artifacts.dart';
 import '../base/common.dart';
 import '../base/context.dart';
 import '../base/file_system.dart';
 import '../base/terminal.dart';
-import '../base/user_messages.dart';
 import '../base/utils.dart';
 import '../cache.dart';
 import '../convert.dart';
 import '../globals.dart' as globals;
+import '../resident_runner.dart';
 import '../tester/flutter_tester.dart';
 import '../version.dart';
 import '../web/web_device.dart';
@@ -26,14 +27,16 @@ abstract final class FlutterGlobalOptions {
   static const String kColorFlag = 'color';
   static const String kContinuousIntegrationFlag = 'ci';
   static const String kDeviceIdOption = 'device-id';
-  static const String kDisableTelemetryFlag = 'disable-telemetry';
-  static const String kEnableTelemetryFlag = 'enable-telemetry';
+  static const String kDisableAnalyticsFlag = 'disable-analytics';
+  static const String kEnableAnalyticsFlag = 'enable-analytics';
   static const String kLocalEngineOption = 'local-engine';
   static const String kLocalEngineSrcPathOption = 'local-engine-src-path';
+  static const String kLocalEngineHostOption = 'local-engine-host';
   static const String kLocalWebSDKOption = 'local-web-sdk';
   static const String kMachineFlag = 'machine';
   static const String kPackagesOption = 'packages';
   static const String kPrefixedErrorsFlag = 'prefixed-errors';
+  static const String kPrintDtd = 'print-dtd';
   static const String kQuietFlag = 'quiet';
   static const String kShowTestDeviceFlag = 'show-test-device';
   static const String kShowWebServerDeviceFlag = 'show-web-server-device';
@@ -43,6 +46,7 @@ abstract final class FlutterGlobalOptions {
   static const String kVersionFlag = 'version';
   static const String kWrapColumnOption = 'wrap-column';
   static const String kWrapFlag = 'wrap';
+  static const String kDebugLogsDirectoryFlag = 'debug-logs-dir';
 }
 
 class FlutterCommandRunner extends CommandRunner<void> {
@@ -100,20 +104,26 @@ class FlutterCommandRunner extends CommandRunner<void> {
         defaultsTo: true,
         hide: !verboseHelp,
         help: 'Allow Flutter to check for updates when this command runs.');
-    argParser.addFlag(FlutterGlobalOptions.kSuppressAnalyticsFlag,
-        negatable: false,
-        help: 'Suppress analytics reporting for the current CLI invocation.');
-    argParser.addFlag(FlutterGlobalOptions.kDisableTelemetryFlag,
-        negatable: false,
-        help: 'Disable telemetry reporting each time a flutter or dart '
-              'command runs, until it is re-enabled.');
-    argParser.addFlag(FlutterGlobalOptions.kEnableTelemetryFlag,
+    argParser.addFlag(FlutterGlobalOptions.kEnableAnalyticsFlag,
         negatable: false,
         help: 'Enable telemetry reporting each time a flutter or dart '
               'command runs.');
+    argParser.addFlag(FlutterGlobalOptions.kDisableAnalyticsFlag,
+        negatable: false,
+        help: 'Disable telemetry reporting each time a flutter or dart '
+              'command runs, until it is re-enabled.');
+    argParser.addFlag(FlutterGlobalOptions.kSuppressAnalyticsFlag,
+        negatable: false,
+        help: 'Suppress analytics reporting for the current CLI invocation.');
     argParser.addOption(FlutterGlobalOptions.kPackagesOption,
         hide: !verboseHelp,
         help: 'Path to your "package_config.json" file.');
+    argParser.addFlag(
+      FlutterGlobalOptions.kPrintDtd,
+      negatable: false,
+      help: 'Print the address of the Dart Tooling Daemon, if one is hosted by the Flutter CLI.',
+      hide: !verboseHelp,
+    );
     if (verboseHelp) {
       argParser.addSeparator('Local build selection options (not normally required):');
     }
@@ -130,6 +140,13 @@ class FlutterCommandRunner extends CommandRunner<void> {
         help: 'Name of a build output within the engine out directory, if you are building Flutter locally.\n'
               'Use this to select a specific version of the engine if you have built multiple engine targets.\n'
               'This path is relative to "--local-engine-src-path" (see above).');
+
+    argParser.addOption(FlutterGlobalOptions.kLocalEngineHostOption,
+        hide: !verboseHelp,
+        help: 'The host operating system for which engine artifacts should be selected, if you are building Flutter locally.\n'
+              'This is only used when "--local-engine" is also specified.\n'
+              'By default, the host is determined automatically, but you may need to specify this if you are building on one '
+              'platform (e.g. MacOS ARM64) but intend to run Flutter on another (e.g. Android).');
 
     argParser.addOption(FlutterGlobalOptions.kLocalWebSDKOption,
         hide: !verboseHelp,
@@ -154,6 +171,11 @@ class FlutterCommandRunner extends CommandRunner<void> {
       FlutterGlobalOptions.kContinuousIntegrationFlag,
       negatable: false,
       help: 'Enable a set of CI-specific test debug settings.',
+      hide: !verboseHelp,
+    );
+    argParser.addOption(
+      FlutterGlobalOptions.kDebugLogsDirectoryFlag,
+      help: 'Path to a directory where logs for debugging may be added.',
       hide: !verboseHelp,
     );
   }
@@ -205,6 +227,9 @@ class FlutterCommandRunner extends CommandRunner<void> {
     }
   }
 
+  // See https://github.com/flutter/flutter/issues/145158.
+  late bool _machineFlagPresentInAnyCliArg;
+
   @override
   Future<void> run(Iterable<String> args) {
     // Have invocations of 'build', 'custom-devices', and 'pub' print out
@@ -220,7 +245,60 @@ class FlutterCommandRunner extends CommandRunner<void> {
       }
     }
 
+    _machineFlagPresentInAnyCliArg = args.contains('--${FlutterGlobalOptions.kMachineFlag}');
     return super.run(args);
+  }
+
+  /// Whether to perform a flutter version check, which prints a warning if old.
+  ///
+  /// This method should be narrowly used in the following manner:
+  /// ```dart
+  /// final bool topLevelMachineFlag = topLevelResults[FlutterGlobalOptions.kMachineFlag] as bool? ?? false;
+  /// if (await _shouldCheckForUpdates(topLevelResults, topLevelMachineFlag: topLevelMachineFlag)) {
+  ///   await globals.flutterVersion.checkFlutterVersionFreshness();
+  /// }
+  /// ```
+  Future<bool> _shouldCheckForUpdates(
+    ArgResults topLevelResults, {
+    required bool topLevelMachineFlag,
+  }) async {
+    // Check if the user has explicitly requested a version check.
+    final bool versionCheckFlag = topLevelResults[FlutterGlobalOptions.kVersionCheckFlag] as bool? ?? false;
+    final bool explicitVersionCheckPassed = topLevelResults.wasParsed(FlutterGlobalOptions.kVersionCheckFlag) && versionCheckFlag;
+    if (explicitVersionCheckPassed) {
+      return true;
+    }
+
+
+    // If the top level --machine flag is set, we don't want to check for updates.
+    if (topLevelMachineFlag) {
+      return false;
+    }
+
+    // Running the "upgrade" command is already checking, don't check twice.
+    if (topLevelResults.command?.name == 'upgrade') {
+      return false;
+    }
+
+    // If the same flag appears in any subcommand, we don't want to check for updates.
+    //
+    // A better solution would be the flag not being in any specific subcommand, just
+    // in the top level command, but that would require a more significant refactor
+    // and deprecation of the current behaviors.
+    //
+    // See https://github.com/flutter/flutter/issues/145158.
+    if (_machineFlagPresentInAnyCliArg) {
+      return false;
+    }
+
+    // e.g. `flutter bash-completion` or `flutter zsh-completion`
+    final bool isShellCompletionCommand = !globals.stdio.hasTerminal && (topLevelResults.command?.name ?? '').endsWith('-completion');
+    if (isShellCompletionCommand || await globals.botDetector.isRunningOnBot) {
+      return false;
+    }
+
+    // Otherwise, check for updates based on the flag which is typically set by default.
+    return versionCheckFlag;
   }
 
   @override
@@ -229,8 +307,8 @@ class FlutterCommandRunner extends CommandRunner<void> {
 
     // If the flag for enabling or disabling telemetry is passed in,
     // we will return out
-    if (topLevelResults.wasParsed(FlutterGlobalOptions.kDisableTelemetryFlag) ||
-        topLevelResults.wasParsed(FlutterGlobalOptions.kEnableTelemetryFlag)) {
+    if (topLevelResults.wasParsed(FlutterGlobalOptions.kDisableAnalyticsFlag) ||
+        topLevelResults.wasParsed(FlutterGlobalOptions.kEnableAnalyticsFlag)) {
       return;
     }
 
@@ -242,10 +320,10 @@ class FlutterCommandRunner extends CommandRunner<void> {
       try {
         wrapColumn = int.parse(topLevelResults[FlutterGlobalOptions.kWrapColumnOption] as String);
         if (wrapColumn < 0) {
-          throwToolExit(userMessages.runnerWrapColumnInvalid(topLevelResults[FlutterGlobalOptions.kWrapColumnOption]));
+          throwToolExit(globals.userMessages.runnerWrapColumnInvalid(topLevelResults[FlutterGlobalOptions.kWrapColumnOption]));
         }
       } on FormatException {
-        throwToolExit(userMessages.runnerWrapColumnParseError(topLevelResults[FlutterGlobalOptions.kWrapColumnOption]));
+        throwToolExit(globals.userMessages.runnerWrapColumnParseError(topLevelResults[FlutterGlobalOptions.kWrapColumnOption]));
       }
     }
 
@@ -273,6 +351,7 @@ class FlutterCommandRunner extends CommandRunner<void> {
     final EngineBuildPaths? engineBuildPaths = await globals.localEngineLocator?.findEnginePath(
       engineSourcePath: topLevelResults[FlutterGlobalOptions.kLocalEngineSrcPathOption] as String?,
       localEngine: topLevelResults[FlutterGlobalOptions.kLocalEngineOption] as String?,
+      localHostEngine: topLevelResults[FlutterGlobalOptions.kLocalEngineHostOption] as String?,
       localWebSdk: topLevelResults[FlutterGlobalOptions.kLocalWebSDKOption] as String?,
       packagePath: topLevelResults[FlutterGlobalOptions.kPackagesOption] as String?,
     );
@@ -295,19 +374,12 @@ class FlutterCommandRunner extends CommandRunner<void> {
 
         if ((topLevelResults[FlutterGlobalOptions.kSuppressAnalyticsFlag] as bool?) ?? false) {
           globals.flutterUsage.suppressAnalytics = true;
+          globals.analytics.suppressTelemetry();
         }
 
         globals.flutterVersion.ensureVersionFile();
         final bool machineFlag = topLevelResults[FlutterGlobalOptions.kMachineFlag] as bool? ?? false;
-        final bool ci = await globals.botDetector.isRunningOnBot;
-        final bool redirectedCompletion = !globals.stdio.hasTerminal &&
-            (topLevelResults.command?.name ?? '').endsWith('-completion');
-        final bool isMachine = machineFlag || ci || redirectedCompletion;
-        final bool versionCheckFlag = topLevelResults[FlutterGlobalOptions.kVersionCheckFlag] as bool? ?? false;
-        final bool explicitVersionCheckPassed = topLevelResults.wasParsed(FlutterGlobalOptions.kVersionCheckFlag) && versionCheckFlag;
-
-        if (topLevelResults.command?.name != 'upgrade' &&
-            (explicitVersionCheckPassed || (versionCheckFlag && !isMachine))) {
+        if (await _shouldCheckForUpdates(topLevelResults, topLevelMachineFlag: machineFlag)) {
           await globals.flutterVersion.checkFlutterVersionFreshness();
         }
 
@@ -319,6 +391,11 @@ class FlutterCommandRunner extends CommandRunner<void> {
 
         if ((topLevelResults[FlutterGlobalOptions.kVersionFlag] as bool?) ?? false) {
           globals.flutterUsage.sendCommand(FlutterGlobalOptions.kVersionFlag);
+          globals.analytics.send(Event.flutterCommandResult(
+            commandPath: 'version',
+            result: 'success',
+            commandHasTerminal: globals.stdio.hasTerminal,
+          ));
           final FlutterVersion version = globals.flutterVersion.fetchTagsAndGetVersion(
             clock: globals.systemClock,
           );
@@ -336,6 +413,10 @@ class FlutterCommandRunner extends CommandRunner<void> {
         if (machineFlag && topLevelResults.command?.name != 'analyze') {
           throwToolExit('The "--machine" flag is only valid with the "--version" flag or the "analyze --suggestions" command.', exitCode: 2);
         }
+
+        final bool shouldPrintDtdUri = topLevelResults[FlutterGlobalOptions.kPrintDtd] as bool? ?? false;
+        DevtoolsLauncher.instance!.printDtdUri = shouldPrintDtdUri;
+
         await super.runCommand(topLevelResults);
       },
     );

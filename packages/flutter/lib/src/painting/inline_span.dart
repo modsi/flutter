@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'dart:ui';
+///
+/// @docImport 'package:flutter/material.dart';
+///
+/// @docImport 'placeholder_span.dart';
+library;
+
 import 'dart:ui' as ui show ParagraphBuilder, StringAttribute;
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +16,7 @@ import 'package:flutter/gestures.dart';
 
 import 'basic_types.dart';
 import 'text_painter.dart';
+import 'text_scaler.dart';
 import 'text_span.dart';
 import 'text_style.dart';
 
@@ -49,8 +57,6 @@ typedef InlineSpanVisitor = bool Function(InlineSpan span);
 class InlineSpanSemanticsInformation {
   /// Constructs an object that holds the text and semantics label values of an
   /// [InlineSpan].
-  ///
-  /// The text parameter must not be null.
   ///
   /// Use [InlineSpanSemanticsInformation.placeholder] instead of directly setting
   /// [isPlaceholder].
@@ -155,7 +161,7 @@ List<InlineSpanSemanticsInformation> combineSemanticsInfo(List<InlineSpanSemanti
 ///  * The subclass [TextSpan] specifies text and may contain child [InlineSpan]s.
 ///  * The subclass [PlaceholderSpan] represents a placeholder that may be
 ///    filled with non-text content. [PlaceholderSpan] itself defines a
-///    [ui.PlaceholderAlignment] and a [TextBaseline]. To be useful,
+///    [PlaceholderAlignment] and a [TextBaseline]. To be useful,
 ///    [PlaceholderSpan] must be extended to define content. An instance of
 ///    this is the [WidgetSpan] class in the widgets library.
 ///  * The subclass [WidgetSpan] specifies embedded inline widgets.
@@ -209,7 +215,7 @@ abstract class InlineSpan extends DiagnosticableTree {
   /// Apply the properties of this object to the given [ParagraphBuilder], from
   /// which a [Paragraph] can be obtained.
   ///
-  /// The `textScaleFactor` parameter specifies a scale that the text and
+  /// The `textScaler` parameter specifies a [TextScaler] that the text and
   /// placeholders will be scaled by. The scaling is performed before layout,
   /// so the text will be laid out with the scaled glyphs and placeholders.
   ///
@@ -218,7 +224,10 @@ abstract class InlineSpan extends DiagnosticableTree {
   /// in the same order as defined in the [InlineSpan] tree.
   ///
   /// [Paragraph] objects can be drawn on [Canvas] objects.
-  void build(ui.ParagraphBuilder builder, { double textScaleFactor = 1.0, List<PlaceholderDimensions>? dimensions });
+  void build(ui.ParagraphBuilder builder, {
+    TextScaler textScaler = TextScaler.noScaling,
+    List<PlaceholderDimensions>? dimensions,
+  });
 
   /// Walks this [InlineSpan] and any descendants in pre-order and calls `visitor`
   /// for each span that has content.

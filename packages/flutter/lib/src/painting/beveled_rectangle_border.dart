@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'rounded_rectangle_border.dart';
+library;
+
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -20,8 +23,6 @@ import 'borders.dart';
 class BeveledRectangleBorder extends OutlinedBorder {
   /// Creates a border like a [RoundedRectangleBorder] except that the corners
   /// are joined by straight lines instead of arcs.
-  ///
-  /// The arguments must not be null.
   const BeveledRectangleBorder({
     super.side,
     this.borderRadius = BorderRadius.zero,

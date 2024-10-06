@@ -109,6 +109,100 @@ void resetScrollOffset(WidgetTester tester) {
 }
 
 void main() {
+  testWidgets('hitTestBehavior is respected', (WidgetTester tester) async {
+    HitTestBehavior? getBehavior(Type of) {
+      final RawGestureDetector widget = tester.widget(find.descendant(
+        of: find.byType(of),
+        matching: find.byType(RawGestureDetector),
+      ));
+      return widget.behavior;
+    }
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SingleChildScrollView(
+          hitTestBehavior: HitTestBehavior.translucent,
+        ),
+      ),
+    );
+    expect(getBehavior(SingleChildScrollView), HitTestBehavior.translucent);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: CustomScrollView(
+          hitTestBehavior: HitTestBehavior.translucent,
+        ),
+      ),
+    );
+    expect(getBehavior(CustomScrollView), HitTestBehavior.translucent);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ListView(
+          hitTestBehavior: HitTestBehavior.translucent,
+        ),
+      ),
+    );
+    expect(getBehavior(ListView), HitTestBehavior.translucent);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GridView.extent(
+          maxCrossAxisExtent: 1,
+          hitTestBehavior: HitTestBehavior.translucent,
+        ),
+      ),
+    );
+    expect(getBehavior(GridView), HitTestBehavior.translucent);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PageView(
+          hitTestBehavior: HitTestBehavior.translucent,
+        ),
+      ),
+    );
+    expect(getBehavior(PageView), HitTestBehavior.translucent);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ListWheelScrollView(
+          itemExtent: 10,
+          hitTestBehavior: HitTestBehavior.translucent,
+          children: const <Widget>[],
+        ),
+      ),
+    );
+    expect(getBehavior(ListWheelScrollView), HitTestBehavior.translucent);
+  });
+
+  testWidgets(
+      'hitTestBehavior.translucent lets widgets underneath catch the hit',
+      (WidgetTester tester) async {
+    final Key key = UniqueKey();
+    bool tapped = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Stack(
+          children: <Widget>[
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => tapped = true,
+                child: SizedBox(key: key, height: 300),
+              ),
+            ),
+            const SingleChildScrollView(
+              hitTestBehavior: HitTestBehavior.translucent,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.tapAt(tester.getCenter(find.byKey(key)));
+    expect(tapped, isTrue);
+  });
+
   testWidgets('Flings on different platforms', (WidgetTester tester) async {
     await pumpTest(tester, TargetPlatform.android);
     await tester.fling(find.byType(Scrollable), const Offset(0.0, -dragOffset), 1000.0);
@@ -359,10 +453,69 @@ void main() {
     expect(getScrollOffset(tester), 0.0);
   });
 
+  testWidgets('Engine is notified of ignored pointer signals (no scroll physics)', (WidgetTester tester) async {
+    await pumpTest(tester, debugDefaultTargetPlatformOverride, scrollable: false);
+    final Offset scrollEventLocation = tester.getCenter(find.byType(Viewport));
+    final TestPointer testPointer = TestPointer(1, ui.PointerDeviceKind.mouse);
+    // Create a hover event so that |testPointer| has a location when generating the scroll.
+    testPointer.hover(scrollEventLocation);
+
+    bool allowedPlatformDefault = false;
+    await tester.sendEventToBinding(
+      testPointer.scroll(
+        const Offset(0.0, 20.0),
+        onRespond: ({required bool allowPlatformDefault}) {
+          allowedPlatformDefault = allowPlatformDefault;
+        },
+      ));
+
+    expect(allowedPlatformDefault, isTrue,
+      reason: 'Engine should be notified of ignored scroll pointer signals.');
+  }, variant: TargetPlatformVariant.all());
+
+  testWidgets('Engine is notified of rejected scroll events (wrong direction)', (WidgetTester tester) async {
+    await pumpTest(
+      tester,
+      debugDefaultTargetPlatformOverride,
+      scrollDirection: Axis.horizontal,
+    );
+
+    final Offset scrollEventLocation = tester.getCenter(find.byType(Viewport));
+    final TestPointer testPointer = TestPointer(1, ui.PointerDeviceKind.mouse);
+    // Create a hover event so that |testPointer| has a location when generating the scroll.
+    testPointer.hover(scrollEventLocation);
+
+    // Horizontal input is accepted
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendEventToBinding(
+      testPointer.scroll(
+        const Offset(0.0, 10.0),
+        onRespond: ({required bool allowPlatformDefault}) {
+          fail('The engine should not be notified when the scroll is accepted.');
+        },
+      ));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // Vertical input not accepted
+    bool allowedPlatformDefault = false;
+    await tester.sendEventToBinding(
+      testPointer.scroll(
+        const Offset(0.0, 20.0),
+        onRespond: ({required bool allowPlatformDefault}) {
+          allowedPlatformDefault = allowPlatformDefault;
+        },
+      ));
+    expect(allowedPlatformDefault, isTrue,
+      reason: 'Engine should be notified when scroll is rejected by the scrollable.');
+  }, variant: TargetPlatformVariant.all());
+
   testWidgets('Holding scroll and Scroll pointer signal will update ScrollDirection.forward / ScrollDirection.reverse', (WidgetTester tester) async {
     ScrollDirection? lastUserScrollingDirection;
 
     final ScrollController controller = ScrollController();
+    addTearDown(controller.dispose);
+
     await pumpTest(tester, TargetPlatform.fuchsia, controller: controller);
 
     controller.addListener(() {
@@ -600,6 +753,8 @@ void main() {
     int cheapWidgets = 0;
     int expensiveWidgets = 0;
     final ScrollController controller = ScrollController();
+    addTearDown(controller.dispose);
+
     await tester.pumpWidget(Directionality(
       textDirection: TextDirection.ltr,
       child: ListView.builder(
@@ -774,6 +929,7 @@ void main() {
 
   testWidgets('ensureVisible does not move PageViews', (WidgetTester tester) async {
     final PageController controller = PageController();
+    addTearDown(controller.dispose);
 
     await tester.pumpWidget(
       Directionality(
@@ -861,6 +1017,7 @@ void main() {
       length: 3,
       vsync: vsync,
     );
+    addTearDown(controller.dispose);
 
     await tester.pumpWidget(
       Directionality(
@@ -945,7 +1102,10 @@ void main() {
   testWidgets('PointerScroll on nested NeverScrollable ListView goes to outer Scrollable.', (WidgetTester tester) async {
     // Regression test for https://github.com/flutter/flutter/issues/70948
     final ScrollController outerController = ScrollController();
+    addTearDown(outerController.dispose);
     final ScrollController innerController = ScrollController();
+    addTearDown(innerController.dispose);
+
     await tester.pumpWidget(MaterialApp(
       theme: ThemeData(useMaterial3: false),
       home: Scaffold(
@@ -1001,6 +1161,8 @@ void main() {
   // Regression test for https://github.com/flutter/flutter/issues/71949
   testWidgets('Zero offset pointer scroll should not trigger an assertion.', (WidgetTester tester) async {
     final ScrollController controller = ScrollController();
+    addTearDown(controller.dispose);
+
     Widget build(double height) {
       return MaterialApp(
         home: Scaffold(
@@ -1027,7 +1189,7 @@ void main() {
 
     // Make the outer constraints larger that the scrollable widget is no longer able to scroll.
     await tester.pumpWidget(build(300.0));
-    expect(controller.position.pixels, 100.0);
+    expect(controller.position.pixels, 0.0);
     expect(controller.position.maxScrollExtent, 0.0);
 
     // Hover over the scroll view and create a zero offset pointer scroll.
@@ -1270,11 +1432,13 @@ void main() {
         key: key,
         viewportBuilder: (BuildContext context, ViewportOffset position) {
           if (withViewPort) {
+            final ViewportOffset offset = ViewportOffset.zero();
+            addTearDown(() => offset.dispose());
             return Viewport(
               slivers: <Widget>[
                 SliverToBoxAdapter(child: Semantics(key: key1, container: true, child: const Text('text1')))
               ],
-              offset: ViewportOffset.zero(),
+              offset: offset,
             );
           }
           return Semantics(key: key1, container: true, child: const Text('text1'));
@@ -1355,6 +1519,113 @@ void main() {
       types(scrollable.resolvedPhysics),
       'AlwaysScrollableScrollPhysics ClampingScrollPhysics RangeMaintainingScrollPhysics',
     );
+  });
+
+  testWidgets('dragDevices change updates widget', (WidgetTester tester) async {
+    bool enable = false;
+
+    await tester.pumpWidget(
+      Builder(
+        builder: (BuildContext context) {
+          return StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+              return MaterialApp(
+                home: Scaffold(
+                  body: Scrollable(
+                    scrollBehavior: const MaterialScrollBehavior().copyWith(dragDevices: <ui.PointerDeviceKind>{
+                      if (enable) ui.PointerDeviceKind.mouse,
+                    }),
+                    viewportBuilder: (BuildContext context, ViewportOffset position) => Viewport(
+                      offset: position,
+                      slivers: const <Widget>[
+                        SliverToBoxAdapter(child: SizedBox(height: 2000.0)),
+                      ],
+                    ),
+                  ),
+                  floatingActionButton: FloatingActionButton(onPressed: () {
+                    setState(() {
+                      enable = !enable;
+                    });
+                  }),
+                ),
+              );
+            },
+          );
+        },
+      )
+    );
+
+    // Gesture should not work.
+    TestGesture gesture = await tester.startGesture(tester.getCenter(find.byType(Scrollable), warnIfMissed: true), kind: ui.PointerDeviceKind.mouse);
+    expect(getScrollOffset(tester), 0.0);
+    await gesture.moveBy(const Offset(0.0, -200));
+    await tester.pumpAndSettle();
+    expect(getScrollOffset(tester), 0.0);
+
+    // Change state to include mouse pointer device.
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pump();
+
+    // Gesture should work after state change.
+    gesture = await tester.startGesture(tester.getCenter(find.byType(Scrollable), warnIfMissed: true), kind: ui.PointerDeviceKind.mouse);
+    expect(getScrollOffset(tester), 0.0);
+    await gesture.moveBy(const Offset(0.0, -200));
+    await tester.pumpAndSettle();
+    expect(getScrollOffset(tester), 200);
+  });
+
+  testWidgets('dragDevices change updates widget when oldWidget scrollBehavior is null', (WidgetTester tester) async {
+    ScrollBehavior? scrollBehavior;
+
+    await tester.pumpWidget(
+      Builder(
+        builder: (BuildContext context) {
+          return StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+              return MaterialApp(
+                home: Scaffold(
+                  body: Scrollable(
+                    physics: const ScrollPhysics(),
+                    scrollBehavior: scrollBehavior,
+                    viewportBuilder: (BuildContext context, ViewportOffset position) => Viewport(
+                      offset: position,
+                      slivers: const <Widget>[
+                        SliverToBoxAdapter(child: SizedBox(height: 2000.0)),
+                      ],
+                    ),
+                  ),
+                  floatingActionButton: FloatingActionButton(onPressed: () {
+                    setState(() {
+                      scrollBehavior = const MaterialScrollBehavior().copyWith(dragDevices: <ui.PointerDeviceKind>{
+                        ui.PointerDeviceKind.mouse
+                      });
+                    });
+                  }),
+                ),
+              );
+            },
+          );
+        },
+      )
+    );
+
+    // Gesture should not work.
+    TestGesture gesture = await tester.startGesture(tester.getCenter(find.byType(Scrollable), warnIfMissed: true), kind: ui.PointerDeviceKind.mouse);
+    expect(getScrollOffset(tester), 0.0);
+    await gesture.moveBy(const Offset(0.0, -200));
+    await tester.pumpAndSettle();
+    expect(getScrollOffset(tester), 0.0);
+
+    // Change state to include mouse pointer device.
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pump();
+
+    // Gesture should work after state change.
+    gesture = await tester.startGesture(tester.getCenter(find.byType(Scrollable), warnIfMissed: true), kind: ui.PointerDeviceKind.mouse);
+    expect(getScrollOffset(tester), 0.0);
+    await gesture.moveBy(const Offset(0.0, -200));
+    await tester.pumpAndSettle();
+    expect(getScrollOffset(tester), 200);
   });
 }
 

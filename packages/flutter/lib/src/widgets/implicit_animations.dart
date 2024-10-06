@@ -274,8 +274,6 @@ class TextStyleTween extends Tween<TextStyle> {
 ///  * [AnimatedSwitcher], which fades from one widget to another.
 abstract class ImplicitlyAnimatedWidget extends StatefulWidget {
   /// Initializes fields for subclasses.
-  ///
-  /// The [curve] and [duration] arguments must not be null.
   const ImplicitlyAnimatedWidget({
     super.key,
     this.curve = Curves.linear,
@@ -365,12 +363,8 @@ abstract class ImplicitlyAnimatedWidgetState<T extends ImplicitlyAnimatedWidget>
   void initState() {
     super.initState();
     _controller.addStatusListener((AnimationStatus status) {
-      switch (status) {
-        case AnimationStatus.completed:
-          widget.onEnd?.call();
-        case AnimationStatus.dismissed:
-        case AnimationStatus.forward:
-        case AnimationStatus.reverse:
+      if (status.isCompleted) {
+        widget.onEnd?.call();
       }
     });
     _constructTweens();
@@ -598,8 +592,6 @@ abstract class AnimatedWidgetBaseState<T extends ImplicitlyAnimatedWidget> exten
 ///  * [AnimatedCrossFade], which fades between two children and interpolates their sizes.
 class AnimatedContainer extends ImplicitlyAnimatedWidget {
   /// Creates a container that animates its parameters implicitly.
-  ///
-  /// The [curve] and [duration] arguments must not be null.
   AnimatedContainer({
     super.key,
     this.alignment,
@@ -805,8 +797,6 @@ class _AnimatedContainerState extends AnimatedWidgetBaseState<AnimatedContainer>
 class AnimatedPadding extends ImplicitlyAnimatedWidget {
   /// Creates a widget that insets its child by a value that animates
   /// implicitly.
-  ///
-  /// The [padding], [curve], and [duration] arguments must not be null.
   AnimatedPadding({
     super.key,
     required this.padding,
@@ -847,7 +837,7 @@ class _AnimatedPaddingState extends AnimatedWidgetBaseState<AnimatedPadding> {
     return Padding(
       padding: _padding!
         .evaluate(animation)
-        .clamp(EdgeInsets.zero, EdgeInsetsGeometry.infinity), // ignore_clamp_double_lint
+        .clamp(EdgeInsets.zero, EdgeInsetsGeometry.infinity),
       child: widget.child,
     );
   }
@@ -893,8 +883,6 @@ class _AnimatedPaddingState extends AnimatedWidgetBaseState<AnimatedPadding> {
 class AnimatedAlign extends ImplicitlyAnimatedWidget {
   /// Creates a widget that positions its child by an alignment that animates
   /// implicitly.
-  ///
-  /// The [alignment], [curve], and [duration] arguments must not be null.
   const AnimatedAlign({
     super.key,
     required this.alignment,
@@ -1031,8 +1019,6 @@ class AnimatedPositioned extends ImplicitlyAnimatedWidget {
   /// [width]), and only two out of the three vertical values ([top],
   /// [bottom], [height]), can be set. In each case, at least one of
   /// the three must be null.
-  ///
-  /// The [curve] and [duration] arguments must not be null.
   const AnimatedPositioned({
     super.key,
     required this.child,
@@ -1049,8 +1035,6 @@ class AnimatedPositioned extends ImplicitlyAnimatedWidget {
        assert(top == null || bottom == null || height == null);
 
   /// Creates a widget that animates the rectangle it occupies implicitly.
-  ///
-  /// The [curve] and [duration] arguments must not be null.
   AnimatedPositioned.fromRect({
     super.key,
     required this.child,
@@ -1182,8 +1166,6 @@ class AnimatedPositionedDirectional extends ImplicitlyAnimatedWidget {
   /// Only two out of the three horizontal values ([start], [end], [width]), and
   /// only two out of the three vertical values ([top], [bottom], [height]), can
   /// be set. In each case, at least one of the three must be null.
-  ///
-  /// The [curve] and [duration] arguments must not be null.
   const AnimatedPositionedDirectional({
     super.key,
     required this.child,
@@ -1345,9 +1327,6 @@ class _AnimatedPositionedDirectionalState extends AnimatedWidgetBaseState<Animat
 ///    an [Animation] is provided by the caller instead of being built in.
 class AnimatedScale extends ImplicitlyAnimatedWidget {
   /// Creates a widget that animates its scale implicitly.
-  ///
-  /// The [scale] argument must not be null.
-  /// The [curve] and [duration] arguments must not be null.
   const AnimatedScale({
     super.key,
     this.child,
@@ -1365,8 +1344,6 @@ class AnimatedScale extends ImplicitlyAnimatedWidget {
   final Widget? child;
 
   /// The target scale.
-  ///
-  /// The scale must not be null.
   final double scale;
 
   /// The alignment of the origin of the coordinate system in which the scale
@@ -1472,9 +1449,6 @@ class _AnimatedScaleState extends ImplicitlyAnimatedWidgetState<AnimatedScale> {
 ///    an [Animation] is provided by the caller instead of being built in.
 class AnimatedRotation extends ImplicitlyAnimatedWidget {
   /// Creates a widget that animates its rotation implicitly.
-  ///
-  /// The [turns] argument must not be null.
-  /// The [curve] and [duration] arguments must not be null.
   const AnimatedRotation({
     super.key,
     this.child,
@@ -1569,8 +1543,6 @@ class _AnimatedRotationState extends ImplicitlyAnimatedWidgetState<AnimatedRotat
 ///    position over a given duration whenever the given [AnimatedAlign.alignment] changes.
 class AnimatedSlide extends ImplicitlyAnimatedWidget {
   /// Creates a widget that animates its offset translation implicitly.
-  ///
-  /// The [offset] and [duration] arguments must not be null.
   const AnimatedSlide({
     super.key,
     this.child,
@@ -1587,8 +1559,6 @@ class AnimatedSlide extends ImplicitlyAnimatedWidget {
 
   /// The target offset.
   /// The child will be translated horizontally by `width * dx` and vertically by `height * dy`
-  ///
-  /// The offset must not be null.
   final Offset offset;
 
   @override
@@ -1674,6 +1644,24 @@ class _AnimatedSlideState extends ImplicitlyAnimatedWidgetState<AnimatedSlide> {
 /// ```
 /// {@end-tool}
 ///
+/// ## Hit testing
+///
+/// Setting the [opacity] to zero does not prevent hit testing from being
+/// applied to the descendants of the [AnimatedOpacity] widget. This can be
+/// confusing for the user, who may not see anything, and may believe the area
+/// of the interface where the [AnimatedOpacity] is hiding a widget to be
+/// non-interactive.
+///
+/// With certain widgets, such as [Flow], that compute their positions only when
+/// they are painted, this can actually lead to bugs (from unexpected geometry
+/// to exceptions), because those widgets are not painted by the [AnimatedOpacity]
+/// widget at all when the [opacity] animation reaches zero.
+///
+/// To avoid such problems, it is generally a good idea to use an
+/// [IgnorePointer] widget when setting the [opacity] to zero. This prevents
+/// interactions with any children in the subtree when the [child] is animating
+/// away.
+///
 /// See also:
 ///
 ///  * [AnimatedCrossFade], for fading between two children.
@@ -1685,8 +1673,7 @@ class _AnimatedSlideState extends ImplicitlyAnimatedWidgetState<AnimatedSlide> {
 class AnimatedOpacity extends ImplicitlyAnimatedWidget {
   /// Creates a widget that animates its opacity implicitly.
   ///
-  /// The [opacity] argument must not be null and must be between 0.0 and 1.0,
-  /// inclusive. The [curve] and [duration] arguments must not be null.
+  /// The [opacity] argument must be between zero and one, inclusive.
   const AnimatedOpacity({
     super.key,
     this.child,
@@ -1706,8 +1693,6 @@ class AnimatedOpacity extends ImplicitlyAnimatedWidget {
   ///
   /// An opacity of 1.0 is fully opaque. An opacity of 0.0 is fully transparent
   /// (i.e., invisible).
-  ///
-  /// The opacity must not be null.
   final double opacity;
 
   /// Whether the semantic information of the children is always included.
@@ -1771,6 +1756,25 @@ class _AnimatedOpacityState extends ImplicitlyAnimatedWidgetState<AnimatedOpacit
 /// ** See code in examples/api/lib/widgets/implicit_animations/sliver_animated_opacity.0.dart **
 /// {@end-tool}
 ///
+/// ## Hit testing
+///
+/// Setting the [opacity] to zero does not prevent hit testing from being
+/// applied to the descendants of the [SliverAnimatedOpacity] widget. This can
+/// be confusing for the user, who may not see anything, and may believe the
+/// area of the interface where the [SliverAnimatedOpacity] is hiding a widget
+/// to be non-interactive.
+///
+/// With certain widgets, such as [Flow], that compute their positions only when
+/// they are painted, this can actually lead to bugs (from unexpected geometry
+/// to exceptions), because those widgets are not painted by the
+/// [SliverAnimatedOpacity] widget at all when the [opacity] animation reaches
+/// zero.
+///
+/// To avoid such problems, it is generally a good idea to use a
+/// [SliverIgnorePointer] widget when setting the [opacity] to zero. This
+/// prevents interactions with any children in the subtree when the [sliver] is
+/// animating away.
+///
 /// See also:
 ///
 ///  * [SliverFadeTransition], an explicitly animated version of this widget, where
@@ -1780,8 +1784,7 @@ class _AnimatedOpacityState extends ImplicitlyAnimatedWidgetState<AnimatedOpacit
 class SliverAnimatedOpacity extends ImplicitlyAnimatedWidget {
   /// Creates a widget that animates its opacity implicitly.
   ///
-  /// The [opacity] argument must not be null and must be between 0.0 and 1.0,
-  /// inclusive. The [curve] and [duration] arguments must not be null.
+  /// The [opacity] argument must be between zero and one, inclusive.
   const SliverAnimatedOpacity({
     super.key,
     this.sliver,
@@ -1799,8 +1802,6 @@ class SliverAnimatedOpacity extends ImplicitlyAnimatedWidget {
   ///
   /// An opacity of 1.0 is fully opaque. An opacity of 0.0 is fully transparent
   /// (i.e., invisible).
-  ///
-  /// The opacity must not be null.
   final double opacity;
 
   /// Whether the semantic information of the children is always included.
@@ -1869,9 +1870,6 @@ class _SliverAnimatedOpacityState extends ImplicitlyAnimatedWidgetState<SliverAn
 /// the lifecycle of the underlying [AnimationController].
 class AnimatedDefaultTextStyle extends ImplicitlyAnimatedWidget {
   /// Creates a widget that animates the default text style implicitly.
-  ///
-  /// The [child], [style], [softWrap], [overflow], [curve], and [duration]
-  /// arguments must not be null.
   const AnimatedDefaultTextStyle({
     super.key,
     required this.child,
@@ -1893,8 +1891,6 @@ class AnimatedDefaultTextStyle extends ImplicitlyAnimatedWidget {
   final Widget child;
 
   /// The target text style.
-  ///
-  /// The text style must not be null.
   ///
   /// When this property is changed, the style will be animated over [duration] time.
   final TextStyle style;
@@ -1987,9 +1983,7 @@ class _AnimatedDefaultTextStyleState extends AnimatedWidgetBaseState<AnimatedDef
 class AnimatedPhysicalModel extends ImplicitlyAnimatedWidget {
   /// Creates a widget that animates the properties of a [PhysicalModel].
   ///
-  /// The [child], [shape], [borderRadius], [elevation], [color], [shadowColor],
-  /// [curve], [clipBehavior], and [duration] arguments must not be null.
-  /// Additionally, [elevation] must be non-negative.
+  /// The [elevation] must be non-negative.
   ///
   /// Animating [color] is optional and is controlled by the [animateColor] flag.
   ///
@@ -1997,10 +1991,10 @@ class AnimatedPhysicalModel extends ImplicitlyAnimatedWidget {
   const AnimatedPhysicalModel({
     super.key,
     required this.child,
-    required this.shape,
+    this.shape = BoxShape.rectangle,
     this.clipBehavior = Clip.none,
-    this.borderRadius = BorderRadius.zero,
-    required this.elevation,
+    this.borderRadius,
+    this.elevation = 0.0,
     required this.color,
     this.animateColor = true,
     required this.shadowColor,
@@ -2026,7 +2020,9 @@ class AnimatedPhysicalModel extends ImplicitlyAnimatedWidget {
   final Clip clipBehavior;
 
   /// The target border radius of the rounded corners for a rectangle shape.
-  final BorderRadius borderRadius;
+  ///
+  /// If null, treated as [BorderRadius.zero].
+  final BorderRadius? borderRadius;
 
   /// The target z-coordinate relative to the parent at which to place this
   /// physical object.
@@ -2070,10 +2066,26 @@ class _AnimatedPhysicalModelState extends AnimatedWidgetBaseState<AnimatedPhysic
 
   @override
   void forEachTween(TweenVisitor<dynamic> visitor) {
-    _borderRadius = visitor(_borderRadius, widget.borderRadius, (dynamic value) => BorderRadiusTween(begin: value as BorderRadius)) as BorderRadiusTween?;
-    _elevation = visitor(_elevation, widget.elevation, (dynamic value) => Tween<double>(begin: value as double)) as Tween<double>?;
-    _color = visitor(_color, widget.color, (dynamic value) => ColorTween(begin: value as Color)) as ColorTween?;
-    _shadowColor = visitor(_shadowColor, widget.shadowColor, (dynamic value) => ColorTween(begin: value as Color)) as ColorTween?;
+    _borderRadius = visitor(
+      _borderRadius,
+      widget.borderRadius ?? BorderRadius.zero,
+      (dynamic value) => BorderRadiusTween(begin: value as BorderRadius),
+    ) as BorderRadiusTween?;
+    _elevation = visitor(
+      _elevation,
+      widget.elevation,
+      (dynamic value) => Tween<double>(begin: value as double),
+    ) as Tween<double>?;
+    _color = visitor(
+      _color,
+      widget.color,
+      (dynamic value) => ColorTween(begin: value as Color),
+    ) as ColorTween?;
+    _shadowColor = visitor(
+      _shadowColor,
+      widget.shadowColor,
+      (dynamic value) => ColorTween(begin: value as Color),
+    ) as ColorTween?;
   }
 
   @override
@@ -2122,7 +2134,6 @@ class AnimatedFractionallySizedBox extends ImplicitlyAnimatedWidget {
   /// space that animates implicitly, and positions its child by an alignment
   /// that animates implicitly.
   ///
-  /// The [curve] and [duration] argument must not be null
   /// If non-null, the [widthFactor] and [heightFactor] arguments must be
   /// non-negative.
   const AnimatedFractionallySizedBox({

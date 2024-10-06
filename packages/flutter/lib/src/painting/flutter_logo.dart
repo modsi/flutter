@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'box_decoration.dart';
+library;
+
 import 'dart:math' as math;
 import 'dart:ui' as ui show Gradient, TextBox, lerpDouble;
 
@@ -38,8 +41,6 @@ class FlutterLogoDecoration extends Decoration {
   ///
   /// The [style] controls whether and where to draw the "Flutter" label. If one
   /// is shown, the [textColor] controls the color of the label.
-  ///
-  /// The [textColor], [style], and [margin] arguments must not be null.
   const FlutterLogoDecoration({
     this.textColor = const Color(0xFF757575),
     this.style = FlutterLogoStyle.markOnly,
@@ -217,9 +218,14 @@ class _FlutterLogoPainter extends BoxPainter {
   final FlutterLogoDecoration _config;
 
   // these are configured assuming a font size of 100.0.
-  // TODO(dnfield): Figure out how to dispose this https://github.com/flutter/flutter/issues/110601
   late TextPainter _textPainter;
   late Rect _textBoundingRect;
+
+  @override
+  void dispose() {
+    _textPainter.dispose();
+    super.dispose();
+  }
 
   void _prepareText() {
     const String kLabel = 'Flutter';
@@ -327,17 +333,11 @@ class _FlutterLogoPainter extends BoxPainter {
     if (canvasSize.isEmpty) {
       return;
     }
-    final Size logoSize;
-    if (_config._position > 0.0) {
-      // horizontal style
-      logoSize = const Size(820.0, 232.0);
-    } else if (_config._position < 0.0) {
-      // stacked style
-      logoSize = const Size(252.0, 306.0);
-    } else {
-      // only the mark
-      logoSize = const Size(202.0, 202.0);
-    }
+    final Size logoSize = switch (_config._position) {
+      > 0.0 => const Size(820.0, 232.0), // horizontal style
+      < 0.0 => const Size(252.0, 306.0), // stacked style
+      _     => const Size(202.0, 202.0), // only the mark
+    };
     final FittedSizes fittedSize = applyBoxFit(BoxFit.contain, logoSize, canvasSize);
     assert(fittedSize.source == logoSize);
     final Rect rect = Alignment.center.inscribe(fittedSize.destination, offset & canvasSize);

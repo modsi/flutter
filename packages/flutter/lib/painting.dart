@@ -17,7 +17,7 @@
 ///    painting boxes.
 library painting;
 
-export 'dart:ui' show PlaceholderAlignment, Shadow, TextHeightBehavior, TextLeadingDistribution;
+export 'dart:ui' show PlaceholderAlignment, Shadow, TextHeightBehavior, TextLeadingDistribution, kTextHeightNone;
 
 export 'src/painting/alignment.dart';
 export 'src/painting/basic_types.dart';
@@ -60,5 +60,6 @@ export 'src/painting/stadium_border.dart';
 export 'src/painting/star_border.dart';
 export 'src/painting/strut_style.dart';
 export 'src/painting/text_painter.dart';
+export 'src/painting/text_scaler.dart';
 export 'src/painting/text_span.dart';
 export 'src/painting/text_style.dart';

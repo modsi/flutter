@@ -69,7 +69,13 @@ class FakeCommand {
 
   /// A callback that is run after [duration] expires but before the [exitCode]
   /// (and output) are passed back.
-  final VoidCallback? onRun;
+  ///
+  /// The callback will be provided the full command that matched this instance.
+  /// This can be useful in the rare scenario where the full command cannot be known
+  /// ahead of time (i.e. when one or more instances of [RegExp] are used to
+  /// match the command). For example, the command may contain one or more
+  /// randomly-generated elements, such as a temporary directory path.
+  final void Function(List<String> command)? onRun;
 
   /// The process' exit code.
   ///
@@ -154,8 +160,13 @@ class FakeProcess implements io.Process {
          }
          return exitCode;
        }),
-      _stderr = stderr,
-      stdin = stdin ?? IOSink(StreamController<List<int>>().sink),
+        _stderr = stderr,
+        stdin = stdin ??
+            IOSink(
+              StreamController<List<int>>()
+                ..stream.listen((_) {})
+                ..sink,
+            ),
       _stdout = stdout,
       _completer = completer
   {
@@ -213,10 +224,17 @@ class FakeProcess implements io.Process {
   /// The raw byte content of stdout.
   final List<int> _stdout;
 
+  /// The list of [kill] signals this process received so far.
+  @visibleForTesting
+  List<io.ProcessSignal> get signals => _signals;
+  final List<io.ProcessSignal> _signals = <io.ProcessSignal>[];
+
   @override
   bool kill([io.ProcessSignal signal = io.ProcessSignal.sigterm]) {
+    _signals.add(signal);
+
     // Killing a fake process has no effect.
-    return false;
+    return true;
   }
 }
 
@@ -299,7 +317,7 @@ abstract class FakeProcessManager implements ProcessManager {
       throw fakeCommand.exception!; // ignore: only_throw_errors
     }
     if (fakeCommand.onRun != null) {
-      fakeCommand.onRun!();
+      fakeCommand.onRun!(command);
     }
     return FakeProcess(
       duration: fakeCommand.duration,
@@ -400,8 +418,9 @@ abstract class FakeProcessManager implements ProcessManager {
     if (fakeProcess == null) {
       return false;
     }
+    fakeProcess.kill(signal);
     if (fakeProcess._completer != null) {
-      fakeProcess._completer!.complete();
+      fakeProcess._completer.complete();
     }
     return true;
   }

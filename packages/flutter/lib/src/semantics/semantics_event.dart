@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'package:flutter/services.dart';
+/// @docImport 'package:flutter/widgets.dart';
+library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
@@ -90,13 +93,9 @@ class AnnounceSemanticsEvent extends SemanticsEvent {
     : super('announce');
 
   /// The message to announce.
-  ///
-  /// This property must not be null.
   final String message;
 
   /// Text direction for [message].
-  ///
-  /// This property must not be null.
   final TextDirection textDirection;
 
   /// Determines whether the announcement should interrupt any existing announcement,
@@ -163,9 +162,9 @@ class TapSemanticEvent extends SemanticsEvent {
 /// An event to move the accessibility focus.
 ///
 /// Using this API is generally not recommended, as it may break a users' expectation of
-/// how a11y focus works and therefore should be just very carefully.
+/// how a11y focus works and therefore should be used very carefully.
 ///
-/// One possibile use case:
+/// One possible use case:
 /// For example, the currently focused rendering object is replaced by another rendering
 /// object. In general, such design should be avoided if possible. If not, one may want
 /// to refocus the newly added rendering object.
@@ -188,7 +187,6 @@ class TapSemanticEvent extends SemanticsEvent {
 /// }
 ///
 /// class _MyWidgetState extends State<MyWidget> {
-///   bool noticeAccepted = false;
 ///   final GlobalKey mykey = GlobalKey();
 ///
 ///   @override

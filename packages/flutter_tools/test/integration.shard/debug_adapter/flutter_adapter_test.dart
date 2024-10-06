@@ -13,6 +13,7 @@ import 'package:flutter_tools/src/globals.dart' as globals;
 import '../../src/common.dart';
 import '../test_data/basic_project.dart';
 import '../test_data/compile_error_project.dart';
+import '../test_data/project.dart';
 import '../test_utils.dart';
 import 'test_client.dart';
 import 'test_server.dart';
@@ -183,17 +184,22 @@ void main() {
 
       final String output = _uniqueOutputLines(outputEvents);
       expect(output, contains('this code does not compile'));
-      expect(output, contains('Exception: Failed to build'));
+      expect(output, contains('Error: Failed to build'));
       expect(output, contains('Exited (1)'));
     });
 
-    /// Helper that tests exception output in either debug or noDebug mode.
-    Future<void> testExceptionOutput({required bool noDebug}) async {
-        final BasicProjectThatThrows project = BasicProjectThatThrows();
+    group('structured errors', () {
+      /// Helper that runs [project] and collects the output.
+      ///
+      /// Line and column numbers are replaced with "1" to avoid fragile tests.
+      Future<String> getExceptionOutput(
+        Project project, {
+        required bool noDebug,
+        required bool ansiColors,
+      }) async {
         await project.setUpIn(tempDir);
 
-        final List<OutputEventBody> outputEvents =
-            await dap.client.collectAllOutput(launch: () {
+        final List<OutputEventBody> outputEvents = await dap.client.collectAllOutput(launch: () {
           // Terminate the app after we see the exception because otherwise
           // it will keep running and `collectAllOutput` won't end.
           dap.client.output
@@ -203,23 +209,85 @@ void main() {
             noDebug: noDebug,
             cwd: project.dir.path,
             toolArgs: <String>['-d', 'flutter-tester'],
+            allowAnsiColorOutput: ansiColors,
           );
         });
 
-        final String output = _uniqueOutputLines(outputEvents);
-        final List<String> outputLines = output.split('\n');
-        expect( outputLines, containsAllInOrder(<String>[
-            '══╡ EXCEPTION CAUGHT BY WIDGETS LIBRARY ╞═══════════════════════════════════════════════════════════',
-            'The following _Exception was thrown building App(dirty):',
-            'Exception: c',
-            'The relevant error-causing widget was:',
-        ]));
-        expect(output, contains('App:${Uri.file(project.dir.path)}/lib/main.dart:24:12'));
-    }
+        String output = _uniqueOutputLines(outputEvents);
 
-    testWithoutContext('correctly outputs exceptions in debug mode', () => testExceptionOutput(noDebug: false));
+        // Replace out any line/columns to make tests less fragile.
+        output = output.replaceAll(RegExp(r'\.dart:\d+:\d+'), '.dart:1:1');
 
-    testWithoutContext('correctly outputs exceptions in noDebug mode', () => testExceptionOutput(noDebug: true));
+        return output;
+      }
+
+      testWithoutContext('correctly outputs exceptions in debug mode', () async {
+        final BasicProjectThatThrows project = BasicProjectThatThrows();
+        final String output = await getExceptionOutput(project, noDebug: false, ansiColors: false);
+
+        expect(
+          output,
+          contains('''
+════════ Exception caught by widgets library ═══════════════════════════════════
+The following _Exception was thrown building App(dirty):
+Exception: c
+
+The relevant error-causing widget was:
+    App App:${Uri.file(project.dir.path)}/lib/main.dart:1:1'''),
+        );
+      });
+
+      testWithoutContext('correctly outputs colored exceptions when supported', () async {
+        final BasicProjectThatThrows project = BasicProjectThatThrows();
+        final String output = await getExceptionOutput(project, noDebug: false, ansiColors: true);
+
+        // Frames in the stack trace that are the users own code will be unformatted, but
+        // frames from the framework are faint (starting with `\x1B[2m`).
+
+        expect(
+          output,
+          contains('''
+════════ Exception caught by widgets library ═══════════════════════════════════
+The following _Exception was thrown building App(dirty):
+Exception: c
+
+The relevant error-causing widget was:
+    App App:${Uri.file(project.dir.path)}/lib/main.dart:1:1
+
+When the exception was thrown, this was the stack:
+#0      c (package:test/main.dart:1:1)
+          ^ source: package:test/main.dart
+#1      App.build (package:test/main.dart:1:1)
+          ^ source: package:test/main.dart
+\x1B[2m#2      StatelessElement.build (package:flutter/src/widgets/framework.dart:1:1)\x1B[0m
+          ^ source: package:flutter/src/widgets/framework.dart
+\x1B[2m#3      ComponentElement.performRebuild (package:flutter/src/widgets/framework.dart:1:1)\x1B[0m
+          ^ source: package:flutter/src/widgets/framework.dart'''),
+        );
+      });
+
+      testWithoutContext('correctly outputs exceptions in noDebug mode', () async {
+        final BasicProjectThatThrows project = BasicProjectThatThrows();
+        final String output = await getExceptionOutput(project, noDebug: true, ansiColors: false);
+
+        // When running in noDebug mode, we don't get the Flutter.Error event so
+        // we get the basic Flutter-formatted version of the error.
+        expect(
+          output,
+          contains('''
+══╡ EXCEPTION CAUGHT BY WIDGETS LIBRARY ╞═══════════════════════════════════════════════════════════
+The following _Exception was thrown building App(dirty):
+Exception: c
+
+The relevant error-causing widget was:
+  App'''),
+        );
+        expect(
+          output,
+          contains('App:${Uri.file(project.dir.path)}/lib/main.dart:1:1'),
+        );
+      });
+    });
 
     testWithoutContext('can hot reload', () async {
       final BasicProject project = BasicProject();
@@ -396,8 +464,11 @@ void main() {
       // Launch the app and wait for it to stop at an exception.
       late int originalThreadId, newThreadId;
       await Future.wait(<Future<void>>[
-        // Capture the thread ID of the stopped thread.
-        dap.client.stoppedEvents.first.then((StoppedEventBody event) => originalThreadId = event.threadId!),
+        // Capture the thread ID of thread when it stops on the exception
+        // (ignoring the stop on entry that occurs during thread start).
+        dap.client.stoppedEvents
+          .where((StoppedEventBody event) => event.reason == 'exception').first
+          .then((StoppedEventBody event) => originalThreadId = event.threadId!),
         dap.client.start(
           exceptionPauseMode: 'All', // Ensure we stop on all exceptions
           launch: () => dap.client.launch(
@@ -410,8 +481,11 @@ void main() {
       // Hot restart, ensuring it completes and capturing the ID of the new thread
       // to pause.
       await Future.wait(<Future<void>>[
-        // Capture the thread ID of the newly stopped thread.
-        dap.client.stoppedEvents.first.then((StoppedEventBody event) => newThreadId = event.threadId!),
+        // Capture the thread ID of the next stop on exception (ignoring any
+        // stop on exit/entry that occurs during thread start/exit).
+        dap.client.stoppedEvents
+            .where((StoppedEventBody event) => event.reason == 'exception').first
+            .then((StoppedEventBody event) => newThreadId = event.threadId!),
         dap.client.hotRestart(),
       ], eagerError: true);
 
@@ -509,6 +583,46 @@ void main() {
       ], eagerError: true);
 
       await dap.client.terminate();
+    });
+
+    group('can step', () {
+      test('into SDK sources mapped to local files when debugSdkLibraries=true', () async {
+        final BasicProject project = BasicProject();
+        await project.setUpIn(tempDir);
+
+        final String breakpointFilePath = globals.fs.path.join(project.dir.path, 'lib', 'main.dart');
+        final int breakpointLine = project.topLevelFunctionBreakpointLine;
+        final String expectedPrintLibraryPath = globals.fs.path.join('pkg', 'sky_engine', 'lib', 'core', 'print.dart');
+
+        // Launch the app and wait for it to print "topLevelFunction".
+        await Future.wait(<Future<void>>[
+          dap.client.stdoutOutput.firstWhere((String output) => output.startsWith('topLevelFunction')),
+          dap.client.start(
+            launch: () => dap.client.launch(
+              cwd: project.dir.path,
+              debugSdkLibraries: true,
+              toolArgs: <String>['-d', 'flutter-tester'],
+            ),
+          ),
+        ], eagerError: true);
+
+        // Add a breakpoint to the `print()` line and hit it.
+        unawaited(dap.client.setBreakpoint(breakpointFilePath, breakpointLine));
+        int stoppedThreadId = (await dap.client.stoppedEvents.firstWhere((StoppedEventBody e) => e.reason == 'breakpoint')).threadId!;
+
+        // Step into `print()` and wait for the next stop.
+        unawaited(dap.client.stepIn(stoppedThreadId));
+        stoppedThreadId = (await dap.client.stoppedEvents.first).threadId!;
+
+        // Fetch the top stack frame and ensure it's been mapped to a local file
+        // correctly.
+        final StackFrame topFrame = (await dap.client.getValidStack(stoppedThreadId, startFrame: 0, numFrames: 1)).stackFrames.single;
+        expect(topFrame.source!.name, 'dart:core/print.dart');
+        // We should have a resolved path ending with the path to the print library.
+        expect(topFrame.source!.path, endsWith(expectedPrintLibraryPath));
+
+        await dap.client.terminate();
+      });
     });
   });
 
@@ -623,17 +737,25 @@ void main() {
         // Trigger the detach.
         dap.client.terminate(),
       ]);
-
     });
   });
 }
 
 /// Extracts the output from a set of [OutputEventBody], removing any
 /// adjacent duplicates and combining into a single string.
+///
+/// If the output event contains a [Source], the name will be shown on the
+/// following line indented and prefixed with `^ source:`.
 String _uniqueOutputLines(List<OutputEventBody> outputEvents) {
   String? lastItem;
   return outputEvents
-      .map((OutputEventBody e) => e.output)
+      .map((OutputEventBody e) {
+        final String output = e.output;
+        final Source? source = e.source;
+        return source != null
+            ? '$output          ^ source: ${source.name}\n'
+            : output;
+      })
       .where((String output) {
         // Skip the item if it's the same as the previous one.
         final bool isDupe = output == lastItem;

@@ -25,7 +25,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:meta/meta_meta.dart';
 
-import 'app.dart';
 import 'basic.dart';
 import 'binding.dart';
 import 'debug.dart';
@@ -336,7 +335,17 @@ class _ScreenshotContainerLayer extends OffsetLayer {
 class _ScreenshotData {
   _ScreenshotData({
     required this.target,
-  }) : containerLayer = _ScreenshotContainerLayer();
+  }) : containerLayer = _ScreenshotContainerLayer() {
+    // TODO(polina-c): stop duplicating code across disposables
+    // https://github.com/flutter/flutter/issues/137435
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectCreated(
+        library: 'package:flutter/widgets.dart',
+        className: '$_ScreenshotData',
+        object: this,
+      );
+    }
+  }
 
   /// Target to take a screenshot of.
   final RenderObject target;
@@ -371,6 +380,15 @@ class _ScreenshotData {
   }
   set screenshotOffset(Offset offset) {
     containerLayer.offset = offset;
+  }
+
+  /// Releases allocated resources.
+  @mustCallSuper
+  void dispose() {
+    if (kFlutterMemoryAllocationsEnabled) {
+      FlutterMemoryAllocations.instance.dispatchObjectDisposed(object: this);
+    }
+    containerLayer.dispose();
   }
 }
 
@@ -550,7 +568,7 @@ class _ScreenshotPaintingContext extends PaintingContext {
     Rect renderBounds, {
     double pixelRatio = 1.0,
     bool debugPaint = false,
-  }) {
+  }) async {
     RenderObject repaintBoundary = renderObject;
     while (!repaintBoundary.isRepaintBoundary) {
       repaintBoundary = repaintBoundary.parent!;
@@ -604,7 +622,15 @@ class _ScreenshotPaintingContext extends PaintingContext {
     // been called successfully for all layers in the regular scene.
     repaintBoundary.debugLayer!.buildScene(ui.SceneBuilder());
 
-    return data.containerLayer.toImage(renderBounds, pixelRatio: pixelRatio);
+    final ui.Image image;
+
+    try {
+      image = await data.containerLayer.toImage(renderBounds, pixelRatio: pixelRatio);
+    } finally {
+      data.dispose();
+    }
+
+    return image;
   }
 }
 
@@ -616,8 +642,6 @@ class _ScreenshotPaintingContext extends PaintingContext {
 class _DiagnosticsPathNode {
   /// Creates a full description of a step in a path through a tree of
   /// [DiagnosticsNode] objects.
-  ///
-  /// The [node] and [child] arguments must not be null.
   _DiagnosticsPathNode({
     required this.node,
     required this.children,
@@ -707,16 +731,19 @@ class InspectorReferenceData {
   int count = 1;
 
   /// The value.
-  Object? get value {
-    if (_ref != null) {
-      return _ref!.target;
-    }
-    return _value;
-  }
+  Object? get value => _ref?.target ?? _value;
 }
 
 // Production implementation of [WidgetInspectorService].
-class _WidgetInspectorService = Object with WidgetInspectorService;
+class _WidgetInspectorService with WidgetInspectorService {
+  _WidgetInspectorService() {
+    selection.addListener(() {
+      if (selectionChangedCallback != null) {
+        selectionChangedCallback!();
+      }
+    });
+  }
+}
 
 /// Service used by GUI tools to interact with the [WidgetInspector].
 ///
@@ -747,6 +774,15 @@ mixin WidgetInspectorService {
   /// The current [WidgetInspectorService].
   static WidgetInspectorService get instance => _instance;
   static WidgetInspectorService _instance = _WidgetInspectorService();
+
+  /// Whether the inspector is in select mode.
+  ///
+  /// In select mode, pointer interactions trigger widget selection instead of
+  /// normal interactions. Otherwise the previously selected widget is
+  /// highlighted but the application can be interacted with normally.
+  @visibleForTesting
+  final ValueNotifier<bool> isSelectMode = ValueNotifier<bool>(true);
+
   @protected
   static set instance(WidgetInspectorService instance) {
     _instance = instance;
@@ -784,7 +820,6 @@ mixin WidgetInspectorService {
   bool _trackRebuildDirtyWidgets = false;
   bool _trackRepaintWidgets = false;
 
-  late RegisterServiceExtensionCallback _registerServiceExtensionCallback;
   /// Registers a service extension method with the given name (full
   /// name "ext.flutter.inspector.name").
   ///
@@ -797,8 +832,9 @@ mixin WidgetInspectorService {
   void registerServiceExtension({
     required String name,
     required ServiceExtensionCallback callback,
+    required RegisterServiceExtensionCallback registerExtension,
   }) {
-    _registerServiceExtensionCallback(
+    registerExtension(
       name: 'inspector.$name',
       callback: callback,
     );
@@ -809,12 +845,14 @@ mixin WidgetInspectorService {
   void _registerSignalServiceExtension({
     required String name,
     required FutureOr<Object?> Function() callback,
+    required RegisterServiceExtensionCallback registerExtension,
   }) {
     registerServiceExtension(
       name: name,
       callback: (Map<String, String> parameters) async {
         return <String, Object?>{'result': await callback()};
       },
+      registerExtension: registerExtension,
     );
   }
 
@@ -827,12 +865,14 @@ mixin WidgetInspectorService {
   void _registerObjectGroupServiceExtension({
     required String name,
     required FutureOr<Object?> Function(String objectGroup) callback,
+    required RegisterServiceExtensionCallback registerExtension,
   }) {
     registerServiceExtension(
       name: name,
       callback: (Map<String, String> parameters) async {
         return <String, Object?>{'result': await callback(parameters['objectGroup']!)};
       },
+      registerExtension: registerExtension,
     );
   }
 
@@ -852,6 +892,7 @@ mixin WidgetInspectorService {
     required String name,
     required AsyncValueGetter<bool> getter,
     required AsyncValueSetter<bool> setter,
+    required RegisterServiceExtensionCallback registerExtension,
   }) {
     registerServiceExtension(
       name: name,
@@ -863,6 +904,7 @@ mixin WidgetInspectorService {
         }
         return <String, dynamic>{'enabled': await getter() ? 'true' : 'false'};
       },
+      registerExtension: registerExtension,
     );
   }
 
@@ -893,6 +935,7 @@ mixin WidgetInspectorService {
   void _registerServiceExtensionWithArg({
     required String name,
     required FutureOr<Object?> Function(String? objectId, String objectGroup) callback,
+    required RegisterServiceExtensionCallback registerExtension,
   }) {
     registerServiceExtension(
       name: name,
@@ -902,6 +945,7 @@ mixin WidgetInspectorService {
           'result': await callback(parameters['arg'], parameters['objectGroup']!),
         };
       },
+      registerExtension: registerExtension,
     );
   }
 
@@ -911,26 +955,22 @@ mixin WidgetInspectorService {
   void _registerServiceExtensionVarArgs({
     required String name,
     required FutureOr<Object?> Function(List<String> args) callback,
+    required RegisterServiceExtensionCallback registerExtension,
   }) {
     registerServiceExtension(
       name: name,
       callback: (Map<String, String> parameters) async {
-        final List<String> args = <String>[];
-        int index = 0;
-        while (true) {
-          final String name = 'arg$index';
-          if (parameters.containsKey(name)) {
-            args.add(parameters[name]!);
-          } else {
-            break;
-          }
-          index++;
-        }
+        int index;
+        final List<String> args = <String>[
+          for (index = 0; parameters['arg$index'] != null; index++)
+            parameters['arg$index']!,
+        ];
         // Verify that the only arguments other than perhaps 'isolateId' are
         // arguments we have already handled.
         assert(index == parameters.length || (index == parameters.length - 1 && parameters.containsKey('isolateId')));
         return <String, Object?>{'result': await callback(args)};
       },
+      registerExtension: registerExtension,
     );
   }
 
@@ -943,7 +983,7 @@ mixin WidgetInspectorService {
   Future<void> forceRebuild() {
     final WidgetsBinding binding = WidgetsBinding.instance;
     if (binding.rootElement != null) {
-      binding.buildOwner!.reassemble(binding.rootElement!, null);
+      binding.buildOwner!.reassemble(binding.rootElement!);
       return binding.endOfFrame;
     }
     return Future<void>.value();
@@ -1011,13 +1051,12 @@ mixin WidgetInspectorService {
   ///  * <https://github.com/dart-lang/sdk/blob/main/runtime/vm/service/service.md#rpcs-requests-and-responses>
   ///  * [BindingBase.initServiceExtensions], which explains when service
   ///    extensions can be used.
-  void initServiceExtensions(RegisterServiceExtensionCallback registerServiceExtensionCallback) {
+  void initServiceExtensions(RegisterServiceExtensionCallback registerExtension) {
     final FlutterExceptionHandler defaultExceptionHandler = FlutterError.presentError;
 
     if (isStructuredErrorsEnabled()) {
       FlutterError.presentError = _reportStructuredError;
     }
-    _registerServiceExtensionCallback = registerServiceExtensionCallback;
     assert(!_debugServiceExtensionsRegistered);
     assert(() {
       _debugServiceExtensionsRegistered = true;
@@ -1033,18 +1072,19 @@ mixin WidgetInspectorService {
         FlutterError.presentError = value ? _reportStructuredError : defaultExceptionHandler;
         return Future<void>.value();
       },
+      registerExtension: registerExtension,
     );
 
     _registerBoolServiceExtension(
       name: WidgetInspectorServiceExtensions.show.name,
-      getter: () async => WidgetsApp.debugShowWidgetInspectorOverride,
+      getter: () async => WidgetsBinding.instance.debugShowWidgetInspectorOverride,
       setter: (bool value) {
-        if (WidgetsApp.debugShowWidgetInspectorOverride == value) {
-          return Future<void>.value();
+        if (WidgetsBinding.instance.debugShowWidgetInspectorOverride != value) {
+          WidgetsBinding.instance.debugShowWidgetInspectorOverride = value;
         }
-        WidgetsApp.debugShowWidgetInspectorOverride = value;
-        return forceRebuild();
+        return Future<void>.value();
       },
+      registerExtension: registerExtension,
     );
 
     if (isWidgetCreationTracked()) {
@@ -1071,6 +1111,15 @@ mixin WidgetInspectorService {
             return;
           }
         },
+        registerExtension: registerExtension,
+      );
+
+      _registerSignalServiceExtension(
+        name: WidgetInspectorServiceExtensions.widgetLocationIdMap.name,
+        callback: () {
+          return _locationIdMapToJson();
+        },
+        registerExtension: registerExtension,
       );
 
       _registerBoolServiceExtension(
@@ -1091,12 +1140,12 @@ mixin WidgetInspectorService {
               renderObject.markNeedsPaint();
               renderObject.visitChildren(markTreeNeedsPaint);
             }
-            final RenderObject root = RendererBinding.instance.renderView;
-            markTreeNeedsPaint(root);
+            RendererBinding.instance.renderViews.forEach(markTreeNeedsPaint);
           } else {
             debugOnProfilePaint = null;
           }
         },
+        registerExtension: registerExtension,
       );
     }
 
@@ -1106,6 +1155,7 @@ mixin WidgetInspectorService {
         disposeAllGroups();
         return null;
       },
+      registerExtension: registerExtension,
     );
     _registerObjectGroupServiceExtension(
       name: WidgetInspectorServiceExtensions.disposeGroup.name,
@@ -1113,10 +1163,12 @@ mixin WidgetInspectorService {
         disposeGroup(name);
         return null;
       },
+      registerExtension: registerExtension,
     );
     _registerSignalServiceExtension(
       name: WidgetInspectorServiceExtensions.isWidgetTreeReady.name,
       callback: isWidgetTreeReady,
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionWithArg(
       name: WidgetInspectorServiceExtensions.disposeId.name,
@@ -1124,6 +1176,7 @@ mixin WidgetInspectorService {
         disposeId(objectId, objectGroup);
         return null;
       },
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionVarArgs(
       name: WidgetInspectorServiceExtensions.setPubRootDirectories.name,
@@ -1131,6 +1184,7 @@ mixin WidgetInspectorService {
         setPubRootDirectories(args);
         return null;
       },
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionVarArgs(
       name: WidgetInspectorServiceExtensions.addPubRootDirectories.name,
@@ -1138,6 +1192,7 @@ mixin WidgetInspectorService {
         addPubRootDirectories(args);
         return null;
       },
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionVarArgs(
       name: WidgetInspectorServiceExtensions.removePubRootDirectories.name,
@@ -1145,49 +1200,65 @@ mixin WidgetInspectorService {
         removePubRootDirectories(args);
         return null;
       },
+      registerExtension: registerExtension,
     );
     registerServiceExtension(
       name: WidgetInspectorServiceExtensions.getPubRootDirectories.name,
       callback: pubRootDirectories,
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionWithArg(
       name: WidgetInspectorServiceExtensions.setSelectionById.name,
       callback: setSelectionById,
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionWithArg(
       name: WidgetInspectorServiceExtensions.getParentChain.name,
       callback: _getParentChain,
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionWithArg(
       name: WidgetInspectorServiceExtensions.getProperties.name,
       callback: _getProperties,
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionWithArg(
       name: WidgetInspectorServiceExtensions.getChildren.name,
       callback: _getChildren,
+      registerExtension: registerExtension,
     );
 
     _registerServiceExtensionWithArg(
       name: WidgetInspectorServiceExtensions.getChildrenSummaryTree.name,
       callback: _getChildrenSummaryTree,
+      registerExtension: registerExtension,
     );
 
     _registerServiceExtensionWithArg(
       name: WidgetInspectorServiceExtensions.getChildrenDetailsSubtree.name,
       callback: _getChildrenDetailsSubtree,
+      registerExtension: registerExtension,
     );
 
     _registerObjectGroupServiceExtension(
       name: WidgetInspectorServiceExtensions.getRootWidget.name,
       callback: _getRootWidget,
+      registerExtension: registerExtension,
     );
     _registerObjectGroupServiceExtension(
       name: WidgetInspectorServiceExtensions.getRootWidgetSummaryTree.name,
       callback: _getRootWidgetSummaryTree,
+      registerExtension: registerExtension,
     );
     registerServiceExtension(
       name: WidgetInspectorServiceExtensions.getRootWidgetSummaryTreeWithPreviews.name,
       callback: _getRootWidgetSummaryTreeWithPreviews,
+      registerExtension: registerExtension,
+    );
+    registerServiceExtension(
+      name: WidgetInspectorServiceExtensions.getRootWidgetTree.name,
+      callback: _getRootWidgetTree,
+      registerExtension: registerExtension,
     );
     registerServiceExtension(
       name: WidgetInspectorServiceExtensions.getDetailsSubtree.name,
@@ -1202,19 +1273,23 @@ mixin WidgetInspectorService {
           ),
         };
       },
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionWithArg(
       name: WidgetInspectorServiceExtensions.getSelectedWidget.name,
       callback: _getSelectedWidget,
+      registerExtension: registerExtension,
     );
     _registerServiceExtensionWithArg(
       name: WidgetInspectorServiceExtensions.getSelectedSummaryWidget.name,
       callback: _getSelectedSummaryWidget,
+      registerExtension: registerExtension,
     );
 
     _registerSignalServiceExtension(
       name: WidgetInspectorServiceExtensions.isWidgetCreationTracked.name,
       callback: isWidgetCreationTracked,
+      registerExtension: registerExtension,
     );
     registerServiceExtension(
       name: WidgetInspectorServiceExtensions.screenshot.name,
@@ -1237,27 +1312,33 @@ mixin WidgetInspectorService {
           return <String, Object?>{'result': null};
         }
         final ByteData? byteData = await image.toByteData(format:ui.ImageByteFormat.png);
+        image.dispose();
 
         return <String, Object>{
           'result': base64.encoder.convert(Uint8List.view(byteData!.buffer)),
         };
       },
+      registerExtension: registerExtension,
     );
     registerServiceExtension(
       name: WidgetInspectorServiceExtensions.getLayoutExplorerNode.name,
       callback: _getLayoutExplorerNode,
+      registerExtension: registerExtension,
     );
     registerServiceExtension(
       name: WidgetInspectorServiceExtensions.setFlexFit.name,
       callback: _setFlexFit,
+      registerExtension: registerExtension,
     );
     registerServiceExtension(
       name: WidgetInspectorServiceExtensions.setFlexFactor.name,
       callback: _setFlexFactor,
+      registerExtension: registerExtension,
     );
     registerServiceExtension(
       name: WidgetInspectorServiceExtensions.setFlexProperties.name,
       callback: _setFlexProperties,
+      registerExtension: registerExtension,
     );
   }
 
@@ -1419,7 +1500,7 @@ mixin WidgetInspectorService {
   @protected
   @Deprecated(
     'Use addPubRootDirectories instead. '
-    'This feature was deprecated after v3.1.0-9.0.pre.',
+    'This feature was deprecated after v3.18.0-2.0.pre.',
   )
   void setPubRootDirectories(List<String> pubRootDirectories) {
     addPubRootDirectories(pubRootDirectories);
@@ -1510,33 +1591,15 @@ mixin WidgetInspectorService {
   /// API surface of methods called from the Flutter IntelliJ Plugin.
   @protected
   bool setSelection(Object? object, [ String? groupName ]) {
-    if (object is Element || object is RenderObject) {
-      if (object is Element) {
-        if (object == selection.currentElement) {
-          return false;
-        }
+    switch (object) {
+      case Element() when object != selection.currentElement:
         selection.currentElement = object;
         _sendInspectEvent(selection.currentElement);
-      } else {
-        if (object == selection.current) {
-          return false;
-        }
-        selection.current = object! as RenderObject;
+        return true;
+      case RenderObject() when object != selection.current:
+        selection.current = object;
         _sendInspectEvent(selection.current);
-      }
-      if (selectionChangedCallback != null) {
-        if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
-          selectionChangedCallback!();
-        } else {
-          // It isn't safe to trigger the selection change callback if we are in
-          // the middle of rendering the frame.
-          SchedulerBinding.instance.scheduleTask(
-            selectionChangedCallback!,
-            Priority.touch,
-          );
-        }
-      }
-      return true;
+        return true;
     }
     return false;
   }
@@ -1612,30 +1675,26 @@ mixin WidgetInspectorService {
 
   List<Object?> _getParentChain(String? id, String groupName) {
     final Object? value = toObject(id);
-    List<_DiagnosticsPathNode> path;
-    if (value is RenderObject) {
-      path = _getRenderObjectParentChain(value, groupName)!;
-    } else if (value is Element) {
-      path = _getElementParentChain(value, groupName);
-    } else {
-      throw FlutterError.fromParts(<DiagnosticsNode>[ErrorSummary('Cannot get parent chain for node of type ${value.runtimeType}')]);
-    }
-
-    return path.map<Object?>((_DiagnosticsPathNode node) => _pathNodeToJson(
-      node,
-      InspectorSerializationDelegate(groupName: groupName, service: this),
-    )).toList();
-  }
-
-  Map<String, Object?>? _pathNodeToJson(_DiagnosticsPathNode? pathNode, InspectorSerializationDelegate delegate) {
-    if (pathNode == null) {
-      return null;
-    }
-    return <String, Object?>{
-      'node': _nodeToJson(pathNode.node, delegate),
-      'children': _nodesToJson(pathNode.children, delegate, parent: pathNode.node),
-      'childIndex': pathNode.childIndex,
+    final List<_DiagnosticsPathNode> path = switch (value) {
+      RenderObject() => _getRenderObjectParentChain(value, groupName)!,
+      Element() => _getElementParentChain(value, groupName),
+      _ => throw FlutterError.fromParts(<DiagnosticsNode>[
+        ErrorSummary('Cannot get parent chain for node of type ${value.runtimeType}'),
+      ]),
     };
+
+    InspectorSerializationDelegate createDelegate() =>
+        InspectorSerializationDelegate(groupName: groupName, service: this);
+
+    return <Object?>[
+      for (final _DiagnosticsPathNode pathNode in path)
+        if (createDelegate() case final InspectorSerializationDelegate delegate)
+          <String, Object?>{
+            'node': _nodeToJson(pathNode.node, delegate),
+            'children': _nodesToJson(pathNode.children, delegate, parent: pathNode.node),
+            'childIndex': pathNode.childIndex,
+          },
+    ];
   }
 
   List<Element> _getRawElementParentChain(Element element, { required int? numLocalParents }) {
@@ -1890,40 +1949,91 @@ mixin WidgetInspectorService {
     String groupName, {
     Map<String, Object>? Function(DiagnosticsNode, InspectorSerializationDelegate)? addAdditionalPropertiesCallback,
   }) {
-    return _nodeToJson(
-      WidgetsBinding.instance.rootElement?.toDiagnosticsNode(),
-      InspectorSerializationDelegate(
-        groupName: groupName,
-        subtreeDepth: 1000000,
-        summaryTree: true,
-        service: this,
-        addAdditionalPropertiesCallback: addAdditionalPropertiesCallback,
-      ),
+    return _getRootWidgetTreeImpl(
+      groupName: groupName,
+      isSummaryTree: true,
+      withPreviews: false,
+      addAdditionalPropertiesCallback: addAdditionalPropertiesCallback,
     );
   }
-
 
   Future<Map<String, Object?>> _getRootWidgetSummaryTreeWithPreviews(
     Map<String, String> parameters,
   ) {
     final String groupName = parameters['groupName']!;
-    final Map<String, Object?>? result = _getRootWidgetSummaryTree(
-      groupName,
-      addAdditionalPropertiesCallback: (DiagnosticsNode node, InspectorSerializationDelegate? delegate) {
-        final Map<String, Object> additionalJson = <String, Object>{};
-        final Object? value = node.value;
-        if (value is Element) {
-          final RenderObject? renderObject = value.renderObject;
-          if (renderObject is RenderParagraph) {
-            additionalJson['textPreview'] = renderObject.text.toPlainText();
-          }
-        }
-        return additionalJson;
-      },
+    final Map<String, Object?>? result = _getRootWidgetTreeImpl(
+      groupName: groupName,
+      isSummaryTree: true,
+      withPreviews: true,
     );
     return Future<Map<String, dynamic>>.value(<String, dynamic>{
       'result': result,
     });
+  }
+
+  Future<Map<String, Object?>> _getRootWidgetTree(
+    Map<String, String> parameters,
+  ) {
+    final String groupName = parameters['groupName']!;
+    final bool isSummaryTree = parameters['isSummaryTree'] == 'true';
+    final bool withPreviews = parameters['withPreviews'] == 'true';
+
+    final Map<String, Object?>? result = _getRootWidgetTreeImpl(
+      groupName: groupName,
+      isSummaryTree: isSummaryTree,
+      withPreviews: withPreviews,
+    );
+
+    return Future<Map<String, dynamic>>.value(<String, dynamic>{
+      'result': result,
+    });
+  }
+
+  Map<String, Object?>? _getRootWidgetTreeImpl({
+    required String groupName,
+    required bool isSummaryTree,
+    required bool withPreviews,
+    Map<String, Object>? Function(
+            DiagnosticsNode, InspectorSerializationDelegate)?
+        addAdditionalPropertiesCallback,
+  }) {
+    final bool shouldAddAdditionalProperties =
+        addAdditionalPropertiesCallback != null || withPreviews;
+
+    // Combine the given addAdditionalPropertiesCallback with logic to add text
+    // previews as well (if withPreviews is true):
+    Map<String, Object>? combinedAddAdditionalPropertiesCallback(
+      DiagnosticsNode node,
+      InspectorSerializationDelegate delegate,
+    ) {
+      final Map<String, Object> additionalPropertiesJson =
+          addAdditionalPropertiesCallback?.call(node, delegate) ??
+              <String, Object>{};
+      if (!withPreviews) {
+        return additionalPropertiesJson;
+      }
+      final Object? value = node.value;
+      if (value is Element) {
+        final RenderObject? renderObject = value.renderObject;
+        if (renderObject is RenderParagraph) {
+          additionalPropertiesJson['textPreview'] =
+              renderObject.text.toPlainText();
+        }
+      }
+      return additionalPropertiesJson;
+    }
+    return _nodeToJson(
+      WidgetsBinding.instance.rootElement?.toDiagnosticsNode(),
+      InspectorSerializationDelegate(
+        groupName: groupName,
+        subtreeDepth: 1000000,
+        summaryTree: isSummaryTree,
+        service: this,
+        addAdditionalPropertiesCallback: shouldAddAdditionalProperties
+            ? combinedAddAdditionalPropertiesCallback
+            : null,
+      ),
+    );
   }
 
   /// Returns a JSON representation of the subtree rooted at the
@@ -2065,24 +2175,35 @@ mixin WidgetInspectorService {
         summaryTree: true,
         subtreeDepth: subtreeDepth,
         service: this,
-        addAdditionalPropertiesCallback: (DiagnosticsNode node, InspectorSerializationDelegate delegate) {
+        addAdditionalPropertiesCallback:
+            (DiagnosticsNode node, InspectorSerializationDelegate delegate) {
           final Object? value = node.value;
-          final RenderObject? renderObject = value is Element ? value.renderObject : null;
+          final RenderObject? renderObject =
+              value is Element ? value.renderObject : null;
           if (renderObject == null) {
             return const <String, Object>{};
           }
 
-          final DiagnosticsSerializationDelegate renderObjectSerializationDelegate = delegate.copyWith(
+          final DiagnosticsSerializationDelegate
+              renderObjectSerializationDelegate = delegate.copyWith(
             subtreeDepth: 0,
             includeProperties: true,
             expandPropertyValues: false,
           );
           final Map<String, Object> additionalJson = <String, Object>{
-            'renderObject': renderObject.toDiagnosticsNode().toJsonMap(renderObjectSerializationDelegate),
+            // Only include renderObject properties separately if this value is not already the renderObject.
+            // Only include if we are expanding property values to mitigate the risk of infinite loops if
+            // RenderObjects have properties that are Element objects.
+            if (value is! RenderObject && delegate.expandPropertyValues)
+              'renderObject': renderObject
+                  .toDiagnosticsNode()
+                  .toJsonMap(renderObjectSerializationDelegate),
           };
 
           final RenderObject? renderParent = renderObject.parent;
-          if (renderParent is RenderObject && subtreeDepth > 0) {
+          if (renderParent != null &&
+              delegate.subtreeDepth > 0 &&
+              delegate.expandPropertyValues) {
             final Object? parentCreator = renderParent.debugCreator;
             if (parentCreator is DebugCreator) {
               additionalJson['parentRenderElement'] =
@@ -2103,7 +2224,7 @@ mixin WidgetInspectorService {
             if (!renderObject.debugNeedsLayout) {
               // ignore: invalid_use_of_protected_member
               final Constraints constraints = renderObject.constraints;
-              final Map<String, Object>constraintsProperty = <String, Object>{
+              final Map<String, Object> constraintsProperty = <String, Object>{
                 'type': constraints.runtimeType.toString(),
                 'description': constraints.toString(),
               };
@@ -2301,10 +2422,12 @@ mixin WidgetInspectorService {
   bool? _widgetCreationTracked;
 
   late Duration _frameStart;
+  late int _frameNumber;
 
   void _onFrameStart(Duration timeStamp) {
     _frameStart = timeStamp;
-    SchedulerBinding.instance.addPostFrameCallback(_onFrameEnd);
+    _frameNumber = PlatformDispatcher.instance.frameData.frameNumber;
+    SchedulerBinding.instance.addPostFrameCallback(_onFrameEnd, debugLabel: 'WidgetInspector.onFrameStart');
   }
 
   void _onFrameEnd(Duration timeStamp) {
@@ -2317,7 +2440,13 @@ mixin WidgetInspectorService {
   }
 
   void _postStatsEvent(String eventName, _ElementLocationStatsTracker stats) {
-    postEvent(eventName, stats.exportToJson(_frameStart));
+    postEvent(
+      eventName,
+      stats.exportToJson(
+        _frameStart,
+        frameNumber: _frameNumber,
+      ),
+    );
   }
 
   /// All events dispatched by a [WidgetInspectorService] use this method
@@ -2526,7 +2655,7 @@ class _ElementLocationStatsTracker {
 
   /// Exports the current counts and then resets the stats to prepare to track
   /// the next frame of data.
-  Map<String, dynamic> exportToJson(Duration startTime) {
+  Map<String, dynamic> exportToJson(Duration startTime, {required int frameNumber}) {
     final List<int> events = List<int>.filled(active.length * 2, 0);
     int j = 0;
     for (final _LocationCount stat in active) {
@@ -2536,6 +2665,7 @@ class _ElementLocationStatsTracker {
 
     final Map<String, dynamic> json = <String, dynamic>{
       'startTime': startTime.inMicroseconds,
+      'frameNumber': frameNumber,
       'events': events,
     };
 
@@ -2613,8 +2743,6 @@ class _WidgetForTypeTests extends Widget {
 /// bottom left corner of the application switches back to select mode.
 class WidgetInspector extends StatefulWidget {
   /// Creates a widget that enables inspection for the child.
-  ///
-  /// The [child] argument must not be null.
   const WidgetInspector({
     super.key,
     required this.child,
@@ -2637,18 +2765,13 @@ class WidgetInspector extends StatefulWidget {
 class _WidgetInspectorState extends State<WidgetInspector>
     with WidgetsBindingObserver {
 
-  _WidgetInspectorState() : selection = WidgetInspectorService.instance.selection;
+  _WidgetInspectorState();
 
   Offset? _lastPointerLocation;
 
-  final InspectorSelection selection;
+  late InspectorSelection selection;
 
-  /// Whether the inspector is in select mode.
-  ///
-  /// In select mode, pointer interactions trigger widget selection instead of
-  /// normal interactions. Otherwise the previously selected widget is
-  /// highlighted but the application can be interacted with normally.
-  bool isSelectMode = true;
+  late bool isSelectMode;
 
   final GlobalKey _ignorePointerKey = GlobalKey();
 
@@ -2656,27 +2779,31 @@ class _WidgetInspectorState extends State<WidgetInspector>
   /// as selecting the edge of the bounding box.
   static const double _edgeHitMargin = 2.0;
 
-  InspectorSelectionChangedCallback? _selectionChangedCallback;
   @override
   void initState() {
     super.initState();
 
-    _selectionChangedCallback = () {
-      setState(() {
-        // The [selection] property which the build method depends on has
-        // changed.
-      });
-    };
-    WidgetInspectorService.instance.selectionChangedCallback = _selectionChangedCallback;
+    WidgetInspectorService.instance.selection
+        .addListener(_selectionInformationChanged);
+    WidgetInspectorService.instance.isSelectMode
+        .addListener(_selectionInformationChanged);
+    selection = WidgetInspectorService.instance.selection;
+    isSelectMode = WidgetInspectorService.instance.isSelectMode.value;
   }
 
   @override
   void dispose() {
-    if (WidgetInspectorService.instance.selectionChangedCallback == _selectionChangedCallback) {
-      WidgetInspectorService.instance.selectionChangedCallback = null;
-    }
+    WidgetInspectorService.instance.selection
+        .removeListener(_selectionInformationChanged);
+    WidgetInspectorService.instance.isSelectMode
+        .removeListener(_selectionInformationChanged);
     super.dispose();
   }
+
+  void _selectionInformationChanged() => setState((){
+    selection = WidgetInspectorService.instance.selection;
+    isSelectMode = WidgetInspectorService.instance.isSelectMode.value;
+  });
 
   bool _hitTestHelper(
     List<RenderObject> hits,
@@ -2764,9 +2891,7 @@ class _WidgetInspectorState extends State<WidgetInspector>
     final RenderObject userRender = ignorePointer.child!;
     final List<RenderObject> selected = hitTest(position, userRender);
 
-    setState(() {
-      selection.candidates = selected;
-    });
+    selection.candidates = selected;
   }
 
   void _handlePanDown(DragDownDetails event) {
@@ -2788,9 +2913,7 @@ class _WidgetInspectorState extends State<WidgetInspector>
     final ui.FlutterView view = View.of(context);
     final Rect bounds = (Offset.zero & (view.physicalSize / view.devicePixelRatio)).deflate(_kOffScreenMargin);
     if (!bounds.contains(_lastPointerLocation!)) {
-      setState(() {
-        selection.clear();
-      });
+      selection.clear();
     }
   }
 
@@ -2802,18 +2925,15 @@ class _WidgetInspectorState extends State<WidgetInspector>
       _inspectAt(_lastPointerLocation!);
       WidgetInspectorService.instance._sendInspectEvent(selection.current);
     }
-    setState(() {
-      // Only exit select mode if there is a button to return to select mode.
-      if (widget.selectButtonBuilder != null) {
-        isSelectMode = false;
-      }
-    });
+
+    // Only exit select mode if there is a button to return to select mode.
+    if (widget.selectButtonBuilder != null) {
+      WidgetInspectorService.instance.isSelectMode.value = false;
+    }
   }
 
   void _handleEnableSelect() {
-    setState(() {
-      isSelectMode = true;
-    });
+      WidgetInspectorService.instance.isSelectMode.value = true;
   }
 
   @override
@@ -2847,7 +2967,14 @@ class _WidgetInspectorState extends State<WidgetInspector>
 }
 
 /// Mutable selection state of the inspector.
-class InspectorSelection {
+class InspectorSelection with ChangeNotifier {
+  /// Creates an instance of [InspectorSelection].
+  InspectorSelection() {
+    if (kFlutterMemoryAllocationsEnabled) {
+      ChangeNotifier.maybeDispatchObjectCreation(this);
+    }
+  }
+
   /// Render objects that are candidates to be selected.
   ///
   /// Tools may wish to iterate through the list of candidates.
@@ -2886,6 +3013,7 @@ class InspectorSelection {
     if (_current != value) {
       _current = value;
       _currentElement = (value?.debugCreator as DebugCreator?)?.element;
+      notifyListeners();
     }
   }
 
@@ -2903,11 +3031,13 @@ class InspectorSelection {
     if (element?.debugIsDefunct ?? false) {
       _currentElement = null;
       _current = null;
+      notifyListeners();
       return;
     }
     if (currentElement != element) {
       _currentElement = element;
       _current = element!.findRenderObject();
+      notifyListeners();
     }
   }
 
@@ -2915,9 +3045,11 @@ class InspectorSelection {
     if (_index < candidates.length) {
       _current = candidates[index];
       _currentElement = (_current?.debugCreator as DebugCreator?)?.element;
+      notifyListeners();
     } else {
       _current = null;
       _currentElement = null;
+      notifyListeners();
     }
   }
 
@@ -2945,7 +3077,6 @@ class _InspectorOverlay extends LeafRenderObjectWidget {
 }
 
 class _RenderInspectorOverlay extends RenderBox {
-  /// The arguments must not be null.
   _RenderInspectorOverlay({ required InspectorSelection selection })
     : _selection = selection;
 
@@ -3087,7 +3218,7 @@ class _InspectorOverlayLayer extends Layer {
   _InspectorOverlayRenderState? _lastState;
 
   /// Picture generated from _lastState.
-  late ui.Picture _picture;
+  ui.Picture? _picture;
 
   TextPainter? _textPainter;
   double? _textPainterMaxWidth;
@@ -3096,6 +3227,7 @@ class _InspectorOverlayLayer extends Layer {
   void dispose() {
     _textPainter?.dispose();
     _textPainter = null;
+    _picture?.dispose();
     super.dispose();
   }
 
@@ -3119,20 +3251,25 @@ class _InspectorOverlayLayer extends Layer {
       }
       candidates.add(_TransformedRect(candidate, rootRenderObject));
     }
+    final _TransformedRect selectedRect = _TransformedRect(selected, rootRenderObject);
+    final String widgetName = selection.currentElement!.toStringShort();
+    final String width = selectedRect.rect.width.toStringAsFixed(1);
+    final String height = selectedRect.rect.height.toStringAsFixed(1);
 
     final _InspectorOverlayRenderState state = _InspectorOverlayRenderState(
       overlayRect: overlayRect,
-      selected: _TransformedRect(selected, rootRenderObject),
-      tooltip: selection.currentElement!.toStringShort(),
+      selected: selectedRect,
+      tooltip: '$widgetName ($width x $height)',
       textDirection: TextDirection.ltr,
       candidates: candidates,
     );
 
     if (state != _lastState) {
       _lastState = state;
+      _picture?.dispose();
       _picture = _buildPicture(state);
     }
-    builder.addPicture(Offset.zero, _picture);
+    builder.addPicture(Offset.zero, _picture!);
   }
 
   ui.Picture _buildPicture(_InspectorOverlayRenderState state) {
@@ -3175,12 +3312,21 @@ class _InspectorOverlayLayer extends Layer {
     final Rect targetRect = MatrixUtils.transformRect(
       state.selected.transform, state.selected.rect,
     );
-    final Offset target = Offset(targetRect.left, targetRect.center.dy);
-    const double offsetFromWidget = 9.0;
-    final double verticalOffset = (targetRect.height) / 2 + offsetFromWidget;
+    if (!targetRect.hasNaN) {
+      final Offset target = Offset(targetRect.left, targetRect.center.dy);
+      const double offsetFromWidget = 9.0;
+      final double verticalOffset = (targetRect.height) / 2 + offsetFromWidget;
 
-    _paintDescription(canvas, state.tooltip, state.textDirection, target, verticalOffset, size, targetRect);
-
+      _paintDescription(
+        canvas,
+        state.tooltip,
+        state.textDirection,
+        target,
+        verticalOffset,
+        size,
+        targetRect,
+      );
+    }
     // TODO(jacobr): provide an option to perform a debug paint of just the
     // selected widget.
     return recorder.endRecording();
@@ -3196,7 +3342,10 @@ class _InspectorOverlayLayer extends Layer {
     Rect targetRect,
   ) {
     canvas.save();
-    final double maxWidth = size.width - 2 * (_kScreenEdgeMargin + _kTooltipPadding);
+    final double maxWidth = math.max(
+      size.width - 2 * (_kScreenEdgeMargin + _kTooltipPadding),
+      0,
+    );
     final TextSpan? textSpan = _textPainter?.text as TextSpan?;
     if (_textPainter == null || textSpan!.text != message || _textPainterMaxWidth != maxWidth) {
       _textPainterMaxWidth = maxWidth;
@@ -3307,7 +3456,7 @@ class _Location {
     required this.file,
     required this.line,
     required this.column,
-    // ignore: unused_element, unused_element_parameter
+    // ignore: unused_element
     this.name,
   });
 
@@ -3324,27 +3473,16 @@ class _Location {
   final String? name;
 
   Map<String, Object?> toJsonMap() {
-    final Map<String, Object?> json = <String, Object?>{
+    return <String, Object?>{
       'file': file,
       'line': line,
       'column': column,
+      if (name != null) 'name': name,
     };
-    if (name != null) {
-      json['name'] = name;
-    }
-    return json;
   }
 
   @override
-  String toString() {
-    final List<String> parts = <String>[];
-    if (name != null) {
-      parts.add(name!);
-    }
-    parts.add(file);
-    parts..add('$line')..add('$column');
-    return parts.join(':');
-  }
+  String toString() => <String>[if (name != null) name!, file, '$line', '$column'].join(':');
 }
 
 bool _isDebugCreator(DiagnosticsNode node) => node is DiagnosticsDebugCreator;
@@ -3484,16 +3622,12 @@ Iterable<DiagnosticsNode> _describeRelevantUserCode(
 ///
 /// The [value] for this property is a string representation of the Flutter
 /// DevTools url.
-///
-/// Properties `description` and `url` must not be null.
 class DevToolsDeepLinkProperty extends DiagnosticsProperty<String> {
   /// Creates a diagnostics property that displays a deep link to Flutter DevTools.
   ///
   /// The [value] of this property will return a map of data for the Flutter
   /// DevTools deep link, including the full `url`, the Flutter DevTools `screenId`,
   /// and the `objectId` in Flutter DevTools that this diagnostic references.
-  ///
-  /// The `description` and `url` arguments must not be null.
   DevToolsDeepLinkProperty(String description, String url)
     : super('', url, description: description, level: DiagnosticLevel.info);
 }
@@ -3569,6 +3703,34 @@ int _toLocationId(_Location location) {
   _locations.add(location);
   _locationToId[location] = id;
   return id;
+}
+
+Map<String, dynamic> _locationIdMapToJson() {
+  const String idsKey = 'ids';
+  const String linesKey = 'lines';
+  const String columnsKey = 'columns';
+  const String namesKey = 'names';
+
+  final Map<String, Map<String, List<Object?>>> fileLocationsMap =
+      <String, Map<String, List<Object?>>>{};
+  for (final MapEntry<_Location, int> entry in _locationToId.entries) {
+    final _Location location = entry.key;
+    final Map<String, List<Object?>> locations = fileLocationsMap.putIfAbsent(
+      location.file,
+      () => <String, List<Object?>>{
+        idsKey: <int>[],
+        linesKey: <int>[],
+        columnsKey: <int>[],
+        namesKey: <String?>[],
+      },
+    );
+
+    locations[idsKey]!.add(entry.value);
+    locations[linesKey]!.add(location.line);
+    locations[columnsKey]!.add(location.column);
+    locations[namesKey]!.add(location.name);
+  }
+  return fileLocationsMap;
 }
 
 /// A delegate that configures how a hierarchy of [DiagnosticsNode]s are
@@ -3757,7 +3919,7 @@ class _WidgetFactory {
 ///
 /// See also:
 ///
-/// * the documentation for [Track widget creation](https://docs.flutter.dev/development/tools/devtools/inspector#track-widget-creation).
+/// * the documentation for [Track widget creation](https://flutter.dev/to/track-widget-creation).
 // The below ignore is needed because the static type of the annotation is used
 // by the CFE kernel transformer that implements the instrumentation to
 // recognize the annotation.

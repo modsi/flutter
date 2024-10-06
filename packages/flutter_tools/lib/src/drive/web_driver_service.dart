@@ -41,6 +41,9 @@ class WebDriverService extends DriverService {
   late ResidentRunner _residentRunner;
   Uri? _webUri;
 
+  @visibleForTesting
+  Uri? get webUri => _webUri;
+
   /// The result of [ResidentRunner.run].
   ///
   /// This is expected to stay `null` throughout the test, as the application
@@ -74,16 +77,25 @@ class WebDriverService extends DriverService {
         DebuggingOptions.disabled(
           buildInfo,
           port: debuggingOptions.port,
+          hostname: debuggingOptions.hostname,
+          webRenderer: debuggingOptions.webRenderer,
+          webUseWasm: debuggingOptions.webUseWasm,
+          webUseLocalCanvaskit: debuggingOptions.webUseLocalCanvaskit,
         )
         : DebuggingOptions.enabled(
           buildInfo,
           port: debuggingOptions.port,
+          hostname: debuggingOptions.hostname,
           disablePortPublication: debuggingOptions.disablePortPublication,
+          webRenderer: debuggingOptions.webRenderer,
+          webUseWasm: debuggingOptions.webUseWasm,
+          webUseLocalCanvaskit: debuggingOptions.webUseLocalCanvaskit,
         ),
       stayResident: true,
       flutterProject: FlutterProject.current(),
       fileSystem: globals.fs,
       usage: globals.flutterUsage,
+      analytics: globals.analytics,
       logger: _logger,
       systemClock: globals.systemClock,
     );
@@ -116,10 +128,15 @@ class WebDriverService extends DriverService {
       throw ToolExit('Failed to start application');
     }
 
-    _webUri = _residentRunner.uri;
-
-    if (_webUri == null) {
+    if (_residentRunner.uri == null) {
       throw ToolExit('Unable to connect to the app. URL not available.');
+    }
+
+    if (debuggingOptions.webLaunchUrl != null) {
+      // It should throw an error if the provided url is invalid so no tryParse
+      _webUri = Uri.parse(debuggingOptions.webLaunchUrl!);
+    } else {
+      _webUri = _residentRunner.uri;
     }
   }
 
@@ -156,7 +173,7 @@ class WebDriverService extends DriverService {
         'Unable to start a WebDriver session for web testing.\n'
         'Make sure you have the correct WebDriver server (e.g. chromedriver) running at $driverPort.\n'
         'For instructions on how to obtain and run a WebDriver server, see:\n'
-        'https://flutter.dev/docs/testing/integration-tests#running-in-a-browser\n'
+        'https://flutter.dev/to/integration-test-on-web\n'
       );
     }
 
@@ -253,7 +270,7 @@ enum Browser implements CliEnum {
   };
 
   @override
-  String get cliName => snakeCase(name, '-');
+  String get cliName => kebabCase(name);
 
   static Browser fromCliName(String? value) => Browser.values.singleWhere(
     (Browser element) => element.cliName == value,

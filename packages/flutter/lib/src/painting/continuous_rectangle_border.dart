@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'rounded_rectangle_border.dart';
+library;
+
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -33,7 +36,7 @@ import 'edge_insets.dart';
 ///    radius in a step function instead of gradually like the
 ///    [ContinuousRectangleBorder].
 class ContinuousRectangleBorder extends OutlinedBorder {
-  /// The arguments must not be null.
+  /// Creates a [ContinuousRectangleBorder].
   const ContinuousRectangleBorder({
     super.side,
     this.borderRadius = BorderRadius.zero,

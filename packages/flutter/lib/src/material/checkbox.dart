@@ -12,7 +12,6 @@ import 'debug.dart';
 import 'material_state.dart';
 import 'theme.dart';
 import 'theme_data.dart';
-import 'toggleable.dart';
 
 // Examples can assume:
 // bool _throwShotAway = false;
@@ -44,6 +43,12 @@ enum _CheckboxType { material, adaptive }
 /// ** See code in examples/api/lib/material/checkbox/checkbox.0.dart **
 /// {@end-tool}
 ///
+/// {@tool dartpad}
+/// This example shows what the checkbox error state looks like.
+///
+/// ** See code in examples/api/lib/material/checkbox/checkbox.1.dart **
+/// {@end-tool}
+///
 /// See also:
 ///
 ///  * [CheckboxListTile], which combines this widget with a [ListTile] so that
@@ -68,8 +73,6 @@ class Checkbox extends StatefulWidget {
   ///   can only be null if [tristate] is true.
   /// * [onChanged], which is called when the value of the checkbox should
   ///   change. It can be set to null to disable the checkbox.
-  ///
-  /// The values of [tristate] and [autofocus] must not be null.
   const Checkbox({
     super.key,
     required this.value,
@@ -385,11 +388,11 @@ class Checkbox extends StatefulWidget {
   /// this is true. This is only used when [ThemeData.useMaterial3] is set to true.
   /// {@endtemplate}
   ///
-  /// Must not be null. Defaults to false.
+  /// Defaults to false.
   final bool isError;
 
   /// {@template flutter.material.checkbox.semanticLabel}
-  /// The semantic label for the checkobox that will be announced by screen readers.
+  /// The semantic label for the checkbox that will be announced by screen readers.
   ///
   /// This is announced in accessibility modes (e.g TalkBack/VoiceOver).
   ///
@@ -439,6 +442,9 @@ class _CheckboxState extends State<Checkbox> with TickerProviderStateMixin, Togg
 
   @override
   bool? get value => widget.value;
+
+  @override
+  Duration? get reactionAnimationDuration => kRadialReactionDuration;
 
   MaterialStateProperty<Color?> get _widgetFillColor {
     return MaterialStateProperty.resolveWith((Set<MaterialState> states) {
@@ -504,13 +510,10 @@ class _CheckboxState extends State<Checkbox> with TickerProviderStateMixin, Togg
     final VisualDensity effectiveVisualDensity = widget.visualDensity
       ?? checkboxTheme.visualDensity
       ?? defaults.visualDensity!;
-    Size size;
-    switch (effectiveMaterialTapTargetSize) {
-      case MaterialTapTargetSize.padded:
-        size = const Size(kMinInteractiveDimension, kMinInteractiveDimension);
-      case MaterialTapTargetSize.shrinkWrap:
-        size = const Size(kMinInteractiveDimension - 8.0, kMinInteractiveDimension - 8.0);
-    }
+    Size size = switch (effectiveMaterialTapTargetSize) {
+      MaterialTapTargetSize.padded     => const Size(kMinInteractiveDimension,       kMinInteractiveDimension),
+      MaterialTapTargetSize.shrinkWrap => const Size(kMinInteractiveDimension - 8.0, kMinInteractiveDimension - 8.0),
+    };
     size += effectiveVisualDensity.baseSizeAdjustment;
 
     final MaterialStateProperty<MouseCursor> effectiveMouseCursor = MaterialStateProperty.resolveWith<MouseCursor>((Set<MaterialState> states) {
@@ -764,10 +767,10 @@ class _CheckboxPainter extends ToggleablePainter {
 
     final Paint strokePaint = _createStrokePaint();
     final Offset origin = size / 2.0 - const Size.square(_kEdgeSize) / 2.0 as Offset;
-    final AnimationStatus status = position.status;
-    final double tNormalized = status == AnimationStatus.forward || status == AnimationStatus.completed
-      ? position.value
-      : 1.0 - position.value;
+    final double tNormalized = switch (position.status) {
+      AnimationStatus.forward || AnimationStatus.completed => position.value,
+      AnimationStatus.reverse || AnimationStatus.dismissed => 1.0 - position.value,
+    };
 
     // Four cases: false to null, false to true, null to false, true to false
     if (previousValue == false || value == false) {
@@ -974,35 +977,35 @@ class _CheckboxDefaultsM3 extends CheckboxThemeData {
     return MaterialStateProperty.resolveWith((Set<MaterialState> states) {
       if (states.contains(MaterialState.error)) {
         if (states.contains(MaterialState.pressed)) {
-          return _colors.error.withOpacity(0.12);
+          return _colors.error.withOpacity(0.1);
         }
         if (states.contains(MaterialState.hovered)) {
           return _colors.error.withOpacity(0.08);
         }
         if (states.contains(MaterialState.focused)) {
-          return _colors.error.withOpacity(0.12);
+          return _colors.error.withOpacity(0.1);
         }
       }
       if (states.contains(MaterialState.selected)) {
         if (states.contains(MaterialState.pressed)) {
-          return _colors.onSurface.withOpacity(0.12);
+          return _colors.onSurface.withOpacity(0.1);
         }
         if (states.contains(MaterialState.hovered)) {
           return _colors.primary.withOpacity(0.08);
         }
         if (states.contains(MaterialState.focused)) {
-          return _colors.primary.withOpacity(0.12);
+          return _colors.primary.withOpacity(0.1);
         }
         return Colors.transparent;
       }
       if (states.contains(MaterialState.pressed)) {
-        return _colors.primary.withOpacity(0.12);
+        return _colors.primary.withOpacity(0.1);
       }
       if (states.contains(MaterialState.hovered)) {
         return _colors.onSurface.withOpacity(0.08);
       }
       if (states.contains(MaterialState.focused)) {
-        return _colors.onSurface.withOpacity(0.12);
+        return _colors.onSurface.withOpacity(0.1);
       }
       return Colors.transparent;
     });

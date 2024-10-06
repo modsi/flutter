@@ -351,7 +351,9 @@ abstract class CreateBase extends FlutterCommand {
     String? kotlinVersion,
     String? gradleVersion,
     bool withPlatformChannelPluginHook = false,
+    bool withSwiftPackageManager = false,
     bool withFfiPluginHook = false,
+    bool withFfiPackage = false,
     bool withEmptyMain = false,
     bool ios = false,
     bool android = false,
@@ -399,9 +401,12 @@ abstract class CreateBase extends FlutterCommand {
       'pluginClassCapitalSnakeCase': pluginClassCapitalSnakeCase,
       'pluginDartClass': pluginDartClass,
       'pluginProjectUUID': const Uuid().v4().toUpperCase(),
+      'withFfi': withFfiPluginHook || withFfiPackage,
+      'withFfiPackage': withFfiPackage,
       'withFfiPluginHook': withFfiPluginHook,
       'withPlatformChannelPluginHook': withPlatformChannelPluginHook,
-      'withPluginHook': withFfiPluginHook || withPlatformChannelPluginHook,
+      'withSwiftPackageManager': withSwiftPackageManager,
+      'withPluginHook': withFfiPluginHook || withFfiPackage || withPlatformChannelPluginHook,
       'withEmptyMain': withEmptyMain,
       'androidLanguage': androidLanguage,
       'iosLanguage': iosLanguage,
@@ -419,9 +424,9 @@ abstract class CreateBase extends FlutterCommand {
       'dartSdkVersionBounds': dartSdkVersionBounds,
       'implementationTests': implementationTests,
       'agpVersion': agpVersion,
+      'agpVersionForModule': gradle.templateAndroidGradlePluginVersionForModule,
       'kotlinVersion': kotlinVersion,
       'gradleVersion': gradleVersion,
-      'gradleVersionForModule': gradle.templateDefaultGradleVersionForModule,
       'compileSdkVersion': gradle.compileSdkVersion,
       'minSdkVersion': gradle.minSdkVersion,
       'ndkVersion': gradle.ndkVersion,
@@ -531,6 +536,7 @@ abstract class CreateBase extends FlutterCommand {
         processManager: globals.processManager,
         platform: globals.platform,
         usage: globals.flutterUsage,
+        analytics: globals.analytics,
         projectDir: project.directory,
         generateDartPluginRegistry: true,
       );
@@ -540,6 +546,7 @@ abstract class CreateBase extends FlutterCommand {
       await generateLocalizationsSyntheticPackage(
         environment: environment,
         buildSystem: globals.buildSystem,
+        buildTargets: globals.buildTargets,
       );
     }
     final List<SupportedPlatform> platformsForMigrateConfig = <SupportedPlatform>[SupportedPlatform.root];
@@ -662,8 +669,18 @@ abstract class CreateBase extends FlutterCommand {
       'templates',
       'template_manifest.json',
     );
+    final String manifestFileContents;
+    try {
+      manifestFileContents = globals.fs.file(manifestPath).readAsStringSync();
+    } on FileSystemException catch (e) {
+      throwToolExit(
+        'Unable to read the template manifest at path "$manifestPath".\n'
+        'Make sure that your user account has sufficient permissions to read this file.\n'
+        'Exception details: $e',
+      );
+    }
     final Map<String, Object?> manifest = json.decode(
-      globals.fs.file(manifestPath).readAsStringSync(),
+      manifestFileContents,
     ) as Map<String, Object?>;
     return Set<Uri>.from(
       (manifest['files']! as List<Object?>).cast<String>().map<Uri>(
@@ -691,11 +708,11 @@ abstract class CreateBase extends FlutterCommand {
 
 // A valid Dart identifier that can be used for a package, i.e. no
 // capital letters.
-// https://dart.dev/guides/language/language-tour#important-concepts
+// https://dart.dev/language#important-concepts
 final RegExp _identifierRegExp = RegExp('[a-z_][a-z0-9_]*');
 
 // non-contextual dart keywords.
-//' https://dart.dev/guides/language/language-tour#keywords
+// https://dart.dev/language/keywords
 const Set<String> _keywords = <String>{
   'abstract',
   'as',
@@ -784,12 +801,38 @@ bool isValidPackageName(String name) {
       !_keywords.contains(name);
 }
 
+/// Returns a potential valid name from the given [name].
+///
+/// If a valid name cannot be found, returns `null`.
+@visibleForTesting
+String? potentialValidPackageName(String name){
+  String newName = name.toLowerCase();
+  if (newName.startsWith(RegExp(r'[0-9]'))) {
+    newName = '_$newName';
+  }
+  newName = newName.replaceAll('-', '_');
+  if (isValidPackageName(newName)) {
+    return newName;
+  } else {
+    return null;
+  }
+}
+
 // Return null if the project name is legal. Return a validation message if
 // we should disallow the project name.
 String? _validateProjectName(String projectName) {
   if (!isValidPackageName(projectName)) {
-    return '"$projectName" is not a valid Dart package name.\n\n'
-        'See https://dart.dev/tools/pub/pubspec#name for more information.';
+    final String? potentialValidName = potentialValidPackageName(projectName);
+
+    return <String>[
+      '"$projectName" is not a valid Dart package name.',
+      '\n\n',
+      'The name should be all lowercase, with underscores to separate words, "just_like_this".',
+      'Use only basic Latin letters and Arabic digits: [a-z0-9_].',
+      "Also, make sure the name is a valid Dart identifier—that it doesn't start with digits and isn't a reserved word.\n",
+      'See https://dart.dev/tools/pub/pubspec#name for more information.',
+      if (potentialValidName != null) '\nTry "$potentialValidName" instead.',
+    ].join();
   }
   if (_packageDependencies.contains(projectName)) {
     return "Invalid project name: '$projectName' - this will conflict with Flutter "

@@ -41,6 +41,8 @@ $license2
 ''';
 
 class TestBinding extends BindingBase with SchedulerBinding, ServicesBinding {
+  ViewFocusEvent? lastFocusEvent;
+
   @override
   TestDefaultBinaryMessenger get defaultBinaryMessenger => super.defaultBinaryMessenger as TestDefaultBinaryMessenger;
 
@@ -53,6 +55,12 @@ class TestBinding extends BindingBase with SchedulerBinding, ServicesBinding {
       super.createBinaryMessenger(),
       outboundHandlers: <String, MessageHandler>{'flutter/keyboard': keyboardHandler},
     );
+  }
+
+  @override
+  void handleViewFocusChanged(ViewFocusEvent event) {
+    super.handleViewFocusChanged(event);
+    lastFocusEvent = event;
   }
 }
 
@@ -89,7 +97,7 @@ void main() {
     int flutterAssetsCallCount = 0;
     binding.defaultBinaryMessenger.setMockMessageHandler('flutter/assets', (ByteData? message) async {
       flutterAssetsCallCount += 1;
-      return Uint8List.fromList('test_asset_data'.codeUnits).buffer.asByteData();
+      return ByteData.sublistView(utf8.encode('test_asset_data'));
     });
 
     await rootBundle.loadString('test_asset');
@@ -160,5 +168,14 @@ void main() {
     expect(logicalKeys.length, 1);
     expect(physicalKeys.first, const PhysicalKeyboardKey(1));
     expect(logicalKeys.first, const LogicalKeyboardKey(1));
+  });
+
+  test('Default handleViewFocusChanged propagates event', () async {
+    const ViewFocusEvent event = ViewFocusEvent(
+      viewId: 0,
+      direction: ViewFocusDirection.forward,
+      state: ViewFocusState.focused);
+    PlatformDispatcher.instance.onViewFocusChange?.call(event);
+    expect(binding.lastFocusEvent, equals(event));
   });
 }

@@ -21,8 +21,6 @@ import 'view.dart';
 class SemanticsDebugger extends StatefulWidget {
   /// Creates a widget that visualizes the semantics for the child.
   ///
-  /// The [child] argument must not be null.
-  ///
   /// [labelStyle] dictates the [TextStyle] used for the semantics labels.
   const SemanticsDebugger({
     super.key,
@@ -47,25 +45,33 @@ class SemanticsDebugger extends StatefulWidget {
 }
 
 class _SemanticsDebuggerState extends State<SemanticsDebugger> with WidgetsBindingObserver {
-  late _SemanticsClient _client;
+  PipelineOwner? _pipelineOwner;
+  SemanticsHandle? _semanticsHandle;
+  int _generation = 0;
 
   @override
   void initState() {
     super.initState();
-    // TODO(abarth): We shouldn't reach out to the WidgetsBinding.instance
-    // static here because we might not be in a tree that's attached to that
-    // binding. Instead, we should find a way to get to the PipelineOwner from
-    // the BuildContext.
-    _client = _SemanticsClient(WidgetsBinding.instance.pipelineOwner)
-      ..addListener(_update);
+    _semanticsHandle = SemanticsBinding.instance.ensureSemantics();
     WidgetsBinding.instance.addObserver(this);
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final PipelineOwner newOwner = View.pipelineOwnerOf(context);
+    assert(newOwner.semanticsOwner != null);
+    if (newOwner != _pipelineOwner) {
+      _pipelineOwner?.semanticsOwner?.removeListener(_update);
+      newOwner.semanticsOwner!.addListener(_update);
+      _pipelineOwner = newOwner;
+    }
+  }
+
+  @override
   void dispose() {
-    _client
-      ..removeListener(_update)
-      ..dispose();
+    _pipelineOwner?.semanticsOwner?.removeListener(_update);
+    _semanticsHandle?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -78,6 +84,7 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> with WidgetsBindi
   }
 
   void _update() {
+    _generation++;
     SchedulerBinding.instance.addPostFrameCallback((Duration timeStamp) {
       // Semantic information are only available at the end of a frame and our
       // only chance to paint them on the screen is the next frame. To achieve
@@ -90,7 +97,7 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> with WidgetsBindi
           // The generation of the _SemanticsDebuggerListener has changed.
         });
       }
-    });
+    }, debugLabel: 'SemanticsDebugger.update');
   }
 
   Offset? _lastPointerDownLocation;
@@ -145,19 +152,15 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> with WidgetsBindi
   }
 
   void _performAction(Offset position, SemanticsAction action) {
-    _pipelineOwner.semanticsOwner?.performActionAt(position, action);
+    _pipelineOwner?.semanticsOwner?.performActionAt(position, action);
   }
-
-  // TODO(abarth): This shouldn't be a static. We should get the pipeline owner
-  // from [context] somehow.
-  PipelineOwner get _pipelineOwner => WidgetsBinding.instance.pipelineOwner;
 
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
       foregroundPainter: _SemanticsDebuggerPainter(
-        _pipelineOwner,
-        _client.generation,
+        _pipelineOwner!,
+        _generation,
         _lastPointerDownLocation, // in physical pixels
         View.of(context).devicePixelRatio,
         widget.labelStyle,
@@ -177,30 +180,6 @@ class _SemanticsDebuggerState extends State<SemanticsDebugger> with WidgetsBindi
         ),
       ),
     );
-  }
-}
-
-class _SemanticsClient extends ChangeNotifier {
-  _SemanticsClient(PipelineOwner pipelineOwner) {
-    _semanticsHandle = pipelineOwner.ensureSemantics(
-      listener: _didUpdateSemantics,
-    );
-  }
-
-  SemanticsHandle? _semanticsHandle;
-
-  @override
-  void dispose() {
-    _semanticsHandle!.dispose();
-    _semanticsHandle = null;
-    super.dispose();
-  }
-
-  int generation = 0;
-
-  void _didUpdateSemantics() {
-    generation += 1;
-    notifyListeners();
   }
 }
 
@@ -304,12 +283,10 @@ class _SemanticsDebuggerPainter extends CustomPainter {
         effectivelabel = '${Unicode.FSI}$tooltipAndLabel${Unicode.PDI}';
         annotations.insert(0, 'MISSING TEXT DIRECTION');
       } else {
-        switch (data.textDirection!) {
-          case TextDirection.rtl:
-            effectivelabel = '${Unicode.RLI}$tooltipAndLabel${Unicode.PDF}';
-          case TextDirection.ltr:
-            effectivelabel = tooltipAndLabel;
-        }
+        effectivelabel = switch (data.textDirection!) {
+          TextDirection.rtl => '${Unicode.RLI}$tooltipAndLabel${Unicode.PDI}',
+          TextDirection.ltr => tooltipAndLabel,
+        };
       }
       if (annotations.isEmpty) {
         message = effectivelabel;

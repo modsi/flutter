@@ -81,6 +81,7 @@ class ContextMenuController {
   ///  * [remove], which removes only the current instance.
   static void removeAny() {
     _menuOverlayEntry?.remove();
+    _menuOverlayEntry?.dispose();
     _menuOverlayEntry = null;
     if (_shownInstance != null) {
       _shownInstance!.onRemove?.call();
@@ -94,7 +95,7 @@ class ContextMenuController {
   /// Cause the underlying [OverlayEntry] to rebuild during the next pipeline
   /// flush.
   ///
-  /// It's necessary to call this function if the output of [contextMenuBuilder]
+  /// It's necessary to call this function if the output of `contextMenuBuilder`
   /// has changed.
   ///
   /// Errors if the context menu is not currently shown.

@@ -32,6 +32,7 @@ class TabBarTheme with Diagnosticable {
     this.indicatorColor,
     this.indicatorSize,
     this.dividerColor,
+    this.dividerHeight,
     this.labelColor,
     this.labelPadding,
     this.labelStyle,
@@ -41,6 +42,7 @@ class TabBarTheme with Diagnosticable {
     this.splashFactory,
     this.mouseCursor,
     this.tabAlignment,
+    this.textScaler,
   });
 
   /// Overrides the default value for [TabBar.indicator].
@@ -54,6 +56,9 @@ class TabBarTheme with Diagnosticable {
 
   /// Overrides the default value for [TabBar.dividerColor].
   final Color? dividerColor;
+
+  /// Overrides the default value for [TabBar.dividerHeight].
+  final double? dividerHeight;
 
   /// Overrides the default value for [TabBar.labelColor].
   ///
@@ -94,6 +99,9 @@ class TabBarTheme with Diagnosticable {
   /// Overrides the default value for [TabBar.tabAlignment].
   final TabAlignment? tabAlignment;
 
+  /// Overrides the default value for [TabBar.textScaler].
+  final TextScaler? textScaler;
+
   /// Creates a copy of this object but with the given fields replaced with the
   /// new values.
   TabBarTheme copyWith({
@@ -101,6 +109,7 @@ class TabBarTheme with Diagnosticable {
     Color? indicatorColor,
     TabBarIndicatorSize? indicatorSize,
     Color? dividerColor,
+    double? dividerHeight,
     Color? labelColor,
     EdgeInsetsGeometry? labelPadding,
     TextStyle? labelStyle,
@@ -110,12 +119,14 @@ class TabBarTheme with Diagnosticable {
     InteractiveInkFeatureFactory? splashFactory,
     MaterialStateProperty<MouseCursor?>? mouseCursor,
     TabAlignment? tabAlignment,
+    TextScaler? textScaler,
   }) {
     return TabBarTheme(
       indicator: indicator ?? this.indicator,
       indicatorColor: indicatorColor ?? this.indicatorColor,
       indicatorSize: indicatorSize ?? this.indicatorSize,
       dividerColor: dividerColor ?? this.dividerColor,
+      dividerHeight: dividerHeight ?? this.dividerHeight,
       labelColor: labelColor ?? this.labelColor,
       labelPadding: labelPadding ?? this.labelPadding,
       labelStyle: labelStyle ?? this.labelStyle,
@@ -125,6 +136,7 @@ class TabBarTheme with Diagnosticable {
       splashFactory: splashFactory ?? this.splashFactory,
       mouseCursor: mouseCursor ?? this.mouseCursor,
       tabAlignment: tabAlignment ?? this.tabAlignment,
+      textScaler: textScaler ?? this.textScaler,
     );
   }
 
@@ -134,8 +146,6 @@ class TabBarTheme with Diagnosticable {
   }
 
   /// Linearly interpolate between two tab bar themes.
-  ///
-  /// The arguments must not be null.
   ///
   /// {@macro dart.ui.shadow.lerp}
   static TabBarTheme lerp(TabBarTheme a, TabBarTheme b, double t) {
@@ -147,6 +157,7 @@ class TabBarTheme with Diagnosticable {
       indicatorColor: Color.lerp(a.indicatorColor, b.indicatorColor, t),
       indicatorSize: t < 0.5 ? a.indicatorSize : b.indicatorSize,
       dividerColor: Color.lerp(a.dividerColor, b.dividerColor, t),
+      dividerHeight: t < 0.5 ? a.dividerHeight : b.dividerHeight,
       labelColor: Color.lerp(a.labelColor, b.labelColor, t),
       labelPadding: EdgeInsetsGeometry.lerp(a.labelPadding, b.labelPadding, t),
       labelStyle: TextStyle.lerp(a.labelStyle, b.labelStyle, t),
@@ -156,6 +167,7 @@ class TabBarTheme with Diagnosticable {
       splashFactory: t < 0.5 ? a.splashFactory : b.splashFactory,
       mouseCursor: t < 0.5 ? a.mouseCursor : b.mouseCursor,
       tabAlignment: t < 0.5 ? a.tabAlignment : b.tabAlignment,
+      textScaler: t < 0.5 ? a.textScaler : b.textScaler,
     );
   }
 
@@ -165,6 +177,7 @@ class TabBarTheme with Diagnosticable {
     indicatorColor,
     indicatorSize,
     dividerColor,
+    dividerHeight,
     labelColor,
     labelPadding,
     labelStyle,
@@ -174,6 +187,7 @@ class TabBarTheme with Diagnosticable {
     splashFactory,
     mouseCursor,
     tabAlignment,
+    textScaler,
   );
 
   @override
@@ -189,6 +203,7 @@ class TabBarTheme with Diagnosticable {
         && other.indicatorColor == indicatorColor
         && other.indicatorSize == indicatorSize
         && other.dividerColor == dividerColor
+        && other.dividerHeight == dividerHeight
         && other.labelColor == labelColor
         && other.labelPadding == labelPadding
         && other.labelStyle == labelStyle
@@ -197,6 +212,7 @@ class TabBarTheme with Diagnosticable {
         && other.overlayColor == overlayColor
         && other.splashFactory == splashFactory
         && other.mouseCursor == mouseCursor
-        && other.tabAlignment == tabAlignment;
+        && other.tabAlignment == tabAlignment
+        && other.textScaler == textScaler;
   }
 }

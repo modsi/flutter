@@ -8,10 +8,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 
 import 'basic.dart';
+import 'focus_manager.dart';
+import 'focus_scope.dart';
 import 'framework.dart';
 import 'navigator.dart';
+import 'pop_scope.dart';
 import 'restoration.dart';
 import 'restoration_properties.dart';
+import 'routes.dart';
 import 'will_pop_scope.dart';
 
 // Duration for delay before announcement in IOS so that the announcement won't be interrupted.
@@ -47,15 +51,26 @@ const Duration _kIOSAnnouncementDelayDuration = Duration(seconds: 1);
 ///  * [TextFormField], a convenience widget that wraps a [TextField] widget in a [FormField].
 class Form extends StatefulWidget {
   /// Creates a container for form fields.
-  ///
-  /// The [child] argument must not be null.
   const Form({
     super.key,
     required this.child,
+    this.canPop,
+    @Deprecated(
+      'Use onPopInvokedWithResult instead. '
+      'This feature was deprecated after v3.22.0-12.0.pre.',
+    )
+    this.onPopInvoked,
+    this.onPopInvokedWithResult,
+    @Deprecated(
+      'Use canPop and/or onPopInvokedWithResult instead. '
+      'This feature was deprecated after v3.12.0-1.0.pre.',
+    )
     this.onWillPop,
     this.onChanged,
     AutovalidateMode? autovalidateMode,
-  }) : autovalidateMode = autovalidateMode ?? AutovalidateMode.disabled;
+  }) : autovalidateMode = autovalidateMode ?? AutovalidateMode.disabled,
+       assert(onPopInvokedWithResult == null || onPopInvoked == null, 'onPopInvoked is deprecated; use onPopInvokedWithResult'),
+       assert(((onPopInvokedWithResult ?? onPopInvoked ?? canPop) == null) || onWillPop == null, 'onWillPop is deprecated; use canPop and/or onPopInvokedWithResult.');
 
   /// Returns the [FormState] of the closest [Form] widget which encloses the
   /// given context, or null if none is found.
@@ -134,7 +149,50 @@ class Form extends StatefulWidget {
   ///
   ///  * [WillPopScope], another widget that provides a way to intercept the
   ///    back button.
+  @Deprecated(
+    'Use canPop and/or onPopInvokedWithResult instead. '
+    'This feature was deprecated after v3.12.0-1.0.pre.',
+  )
   final WillPopCallback? onWillPop;
+
+  /// {@macro flutter.widgets.PopScope.canPop}
+  ///
+  /// {@tool dartpad}
+  /// This sample demonstrates how to use this parameter to show a confirmation
+  /// dialog when a navigation pop would cause form data to be lost.
+  ///
+  /// ** See code in examples/api/lib/widgets/form/form.1.dart **
+  /// {@end-tool}
+  ///
+  /// See also:
+  ///
+  ///  * [onPopInvokedWithResult], which also comes from [PopScope] and is often used in
+  ///    conjunction with this parameter.
+  ///  * [PopScope.canPop], which is what [Form] delegates to internally.
+  final bool? canPop;
+
+  /// {@macro flutter.widgets.navigator.onPopInvokedWithResult}
+  @Deprecated(
+    'Use onPopInvokedWithResult instead. '
+    'This feature was deprecated after v3.22.0-12.0.pre.',
+  )
+  final PopInvokedCallback? onPopInvoked;
+
+  /// {@macro flutter.widgets.navigator.onPopInvokedWithResult}
+  ///
+  /// {@tool dartpad}
+  /// This sample demonstrates how to use this parameter to show a confirmation
+  /// dialog when a navigation pop would cause form data to be lost.
+  ///
+  /// ** See code in examples/api/lib/widgets/form/form.1.dart **
+  /// {@end-tool}
+  ///
+  /// See also:
+  ///
+  ///  * [canPop], which also comes from [PopScope] and is often used in
+  ///    conjunction with this parameter.
+  ///  * [PopScope.onPopInvokedWithResult], which is what [Form] delegates to internally.
+  final PopInvokedWithResultCallback<Object?>? onPopInvokedWithResult;
 
   /// Called when one of the form fields changes.
   ///
@@ -147,6 +205,14 @@ class Form extends StatefulWidget {
   ///
   /// {@macro flutter.widgets.FormField.autovalidateMode}
   final AutovalidateMode autovalidateMode;
+
+  void _callPopInvoked(bool didPop, Object? result) {
+    if (onPopInvokedWithResult != null) {
+      onPopInvokedWithResult!(didPop, result);
+      return;
+    }
+    onPopInvoked?.call(didPop);
+  }
 
   @override
   FormState createState() => FormState();
@@ -168,8 +234,7 @@ class FormState extends State<Form> {
   void _fieldDidChange() {
     widget.onChanged?.call();
 
-    _hasInteractedByUser = _fields
-        .any((FormFieldState<dynamic> field) => field._hasInteractedByUser.value);
+    _hasInteractedByUser = _fields.any((FormFieldState<dynamic> field) => field._hasInteractedByUser.value);
     _forceRebuild();
   }
 
@@ -181,10 +246,22 @@ class FormState extends State<Form> {
 
   void _register(FormFieldState<dynamic> field) {
     _fields.add(field);
+    if (widget.autovalidateMode == AutovalidateMode.onUnfocus) {
+      field._focusNode.addListener(() => _updateField(field));
+    }
   }
 
   void _unregister(FormFieldState<dynamic> field) {
     _fields.remove(field);
+    if (widget.autovalidateMode == AutovalidateMode.onUnfocus) {
+      field._focusNode.removeListener(()=> _updateField(field));
+    }
+  }
+
+  void _updateField(FormFieldState<dynamic> field) {
+    if (!field._focusNode.hasFocus) {
+      _validate();
+    }
   }
 
   @override
@@ -196,8 +273,21 @@ class FormState extends State<Form> {
         if (_hasInteractedByUser) {
           _validate();
         }
+      case AutovalidateMode.onUnfocus:
       case AutovalidateMode.disabled:
         break;
+    }
+
+    if (widget.canPop != null || (widget.onPopInvokedWithResult ?? widget.onPopInvoked) != null) {
+      return PopScope<Object?>(
+        canPop: widget.canPop ?? true,
+        onPopInvokedWithResult: widget._callPopInvoked,
+        child: _FormScope(
+          formState: this,
+          generation: _generation,
+          child: widget.child,
+        ),
+      );
     }
 
     return WillPopScope(
@@ -236,18 +326,48 @@ class FormState extends State<Form> {
   /// returns true if there are no errors.
   ///
   /// The form will rebuild to report the results.
+  ///
+  /// See also:
+  ///  * [validateGranularly], which also validates descendant [FormField]s,
+  /// but instead returns a [Set] of fields with errors.
   bool validate() {
     _hasInteractedByUser = true;
     _forceRebuild();
     return _validate();
   }
 
-  bool _validate() {
+  /// Validates every [FormField] that is a descendant of this [Form], and
+  /// returns a [Set] of [FormFieldState] of the invalid field(s) only, if any.
+  ///
+  /// This method can be useful to highlight field(s) with errors.
+  ///
+  /// The form will rebuild to report the results.
+  ///
+  /// See also:
+  ///  * [validate], which also validates descendant [FormField]s,
+  /// and return true if there are no errors.
+  Set<FormFieldState<Object?>> validateGranularly() {
+    final Set<FormFieldState<Object?>> invalidFields = <FormFieldState<Object?>>{};
+    _hasInteractedByUser = true;
+    _forceRebuild();
+    _validate(invalidFields);
+    return invalidFields;
+  }
+
+  bool _validate([Set<FormFieldState<Object?>>? invalidFields]) {
     bool hasError = false;
     String errorMessage = '';
+    final bool validateOnFocusChange = widget.autovalidateMode == AutovalidateMode.onUnfocus;
+
     for (final FormFieldState<dynamic> field in _fields) {
-      hasError = !field.validate() || hasError;
-      errorMessage += field.errorText ?? '';
+      if (!validateOnFocusChange || !field._focusNode.hasFocus) {
+        final bool isFieldValid = field.validate();
+        hasError = !isFieldValid || hasError;
+        errorMessage += field.errorText ?? '';
+        if (invalidFields != null && !isFieldValid) {
+          invalidFields.add(field);
+        }
+      }
     }
 
     if (errorMessage.isNotEmpty) {
@@ -261,6 +381,7 @@ class FormState extends State<Form> {
         SemanticsService.announce(errorMessage, directionality, assertiveness: Assertiveness.assertive);
       }
     }
+
     return !hasError;
   }
 }
@@ -270,8 +391,8 @@ class _FormScope extends InheritedWidget {
     required super.child,
     required FormState formState,
     required int generation,
-  }) : _formState = formState,
-       _generation = generation;
+  })  : _formState = formState,
+        _generation = generation;
 
   final FormState _formState;
 
@@ -327,12 +448,11 @@ typedef FormFieldBuilder<T> = Widget Function(FormFieldState<T> field);
 ///  * [TextField], which is a commonly used form field for entering text.
 class FormField<T> extends StatefulWidget {
   /// Creates a single form field.
-  ///
-  /// The [builder] argument must not be null.
   const FormField({
     super.key,
     required this.builder,
     this.onSaved,
+    this.forceErrorText,
     this.validator,
     this.initialValue,
     this.enabled = true,
@@ -343,6 +463,24 @@ class FormField<T> extends StatefulWidget {
   /// An optional method to call with the final value when the form is saved via
   /// [FormState.save].
   final FormFieldSetter<T>? onSaved;
+
+  /// An optional property that forces the [FormFieldState] into an error state
+  /// by directly setting the [FormFieldState.errorText] property without
+  /// running the validator function.
+  ///
+  /// When the [forceErrorText] property is provided, the [FormFieldState.errorText]
+  /// will be set to the provided value, causing the form field to be considered
+  /// invalid and to display the error message specified.
+  ///
+  /// When [validator] is provided, [forceErrorText] will override any error that it
+  /// returns. [validator] will not be called unless [forceErrorText] is null.
+  ///
+  /// See also:
+  ///
+  /// * [InputDecoration.errorText], which is used to display error messages in the text
+  /// field's decoration without effecting the field's state. When [forceErrorText] is
+  /// not null, it will override [InputDecoration.errorText] value.
+  final String? forceErrorText;
 
   /// An optional method that validates an input. Returns an error string to
   /// display if the input is invalid, or null otherwise.
@@ -365,6 +503,9 @@ class FormField<T> extends StatefulWidget {
   final FormFieldBuilder<T> builder;
 
   /// An optional value to initialize the form field to, or null otherwise.
+  ///
+  /// This is called `value` in the [DropdownButtonFormField] constructor to be
+  /// consistent with [DropdownButton].
   final T? initialValue;
 
   /// Whether the form is able to receive user input.
@@ -383,7 +524,7 @@ class FormField<T> extends StatefulWidget {
   /// will auto-validate even without user interaction. If
   /// [AutovalidateMode.disabled], auto-validation will be disabled.
   ///
-  /// Defaults to [AutovalidateMode.disabled], cannot be null.
+  /// Defaults to [AutovalidateMode.disabled].
   /// {@endtemplate}
   final AutovalidateMode autovalidateMode;
 
@@ -409,19 +550,32 @@ class FormField<T> extends StatefulWidget {
 /// for use in constructing the form field's widget.
 class FormFieldState<T> extends State<FormField<T>> with RestorationMixin {
   late T? _value = widget.initialValue;
-  final RestorableStringN _errorText = RestorableStringN(null);
+  // Marking it as late, so it can be registered
+  // with the value provided by [forceErrorText].
+  late final RestorableStringN _errorText;
   final RestorableBool _hasInteractedByUser = RestorableBool(false);
+  final FocusNode _focusNode = FocusNode();
 
   /// The current value of the form field.
   T? get value => _value;
 
   /// The current validation error returned by the [FormField.validator]
-  /// callback, or null if no errors have been triggered. This only updates when
-  /// [validate] is called.
+  /// callback, or the manually provided error message using the
+  /// [FormField.forceErrorText] property.
+  ///
+  /// This property is automatically updated when [validate] is called and the
+  /// [FormField.validator] callback is invoked, or If [FormField.forceErrorText] is set
+  /// directly to a non-null value.
   String? get errorText => _errorText.value;
 
   /// True if this field has any validation errors.
   bool get hasError => _errorText.value != null;
+
+  /// Returns true if the user has modified the value of this field.
+  ///
+  /// This only updates to true once [didChange] has been called and resets to
+  /// false when [reset] is called.
+  bool get hasInteractedByUser => _hasInteractedByUser.value;
 
   /// True if the current value is valid.
   ///
@@ -431,7 +585,9 @@ class FormFieldState<T> extends State<FormField<T>> with RestorationMixin {
   /// See also:
   ///
   ///  * [validate], which may update [errorText] and [hasError].
-  bool get isValid => widget.validator?.call(_value) == null;
+  ///
+  ///  * [FormField.forceErrorText], which also may update [errorText] and [hasError].
+  bool get isValid => widget.forceErrorText == null && widget.validator?.call(_value) == null;
 
   /// Calls the [FormField]'s onSaved method with the current value.
   void save() {
@@ -448,9 +604,10 @@ class FormFieldState<T> extends State<FormField<T>> with RestorationMixin {
     Form.maybeOf(context)?._fieldDidChange();
   }
 
-  /// Calls [FormField.validator] to set the [errorText]. Returns true if there
-  /// were no errors.
+  /// Calls [FormField.validator] to set the [errorText] only if [FormField.forceErrorText] is null.
+  /// When [FormField.forceErrorText] is not null, [FormField.validator] will not be called.
   ///
+  /// Returns true if there were no errors.
   /// See also:
   ///
   ///  * [isValid], which passively gets the validity without setting
@@ -463,8 +620,15 @@ class FormFieldState<T> extends State<FormField<T>> with RestorationMixin {
   }
 
   void _validate() {
+    if (widget.forceErrorText != null) {
+      _errorText.value = widget.forceErrorText;
+      // Skip validating if error is forced.
+      return;
+    }
     if (widget.validator != null) {
       _errorText.value = widget.validator!(_value);
+    } else {
+      _errorText.value = null;
     }
   }
 
@@ -511,6 +675,28 @@ class FormFieldState<T> extends State<FormField<T>> with RestorationMixin {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _errorText = RestorableStringN(widget.forceErrorText);
+  }
+
+  @override
+  void didUpdateWidget(FormField<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.forceErrorText != oldWidget.forceErrorText) {
+      _errorText.value = widget.forceErrorText;
+    }
+  }
+
+  @override
+  void dispose() {
+    _errorText.dispose();
+    _focusNode.dispose();
+    _hasInteractedByUser.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (widget.enabled) {
       switch (widget.autovalidateMode) {
@@ -520,13 +706,34 @@ class FormFieldState<T> extends State<FormField<T>> with RestorationMixin {
           if (_hasInteractedByUser.value) {
             _validate();
           }
+        case AutovalidateMode.onUnfocus:
         case AutovalidateMode.disabled:
           break;
       }
     }
+
     Form.maybeOf(context)?._register(this);
+
+    if (Form.maybeOf(context)?.widget.autovalidateMode == AutovalidateMode.onUnfocus && widget.autovalidateMode != AutovalidateMode.always ||
+        widget.autovalidateMode == AutovalidateMode.onUnfocus) {
+      return Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onFocusChange: (bool value) {
+          if (!value) {
+            setState(() {
+              _validate();
+            });
+          }
+        },
+        focusNode: _focusNode,
+        child: widget.builder(this),
+      );
+    }
+
     return widget.builder(this);
   }
+
 }
 
 /// Used to configure the auto validation of [FormField] and [Form] widgets.
@@ -540,4 +747,11 @@ enum AutovalidateMode {
   /// Used to auto-validate [Form] and [FormField] only after each user
   /// interaction.
   onUserInteraction,
+
+  /// Used to auto-validate [Form] and [FormField] only after the field has
+  /// lost focus.
+  ///
+  /// In order to validate all fields of a [Form] after the first time the user interacts
+  /// with one, use [always] instead.
+  onUnfocus,
 }

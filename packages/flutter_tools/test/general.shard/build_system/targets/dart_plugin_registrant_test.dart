@@ -75,7 +75,7 @@ const String _kSamplePluginPubspec = '''
 name: path_provider_linux
 description: linux implementation of the path_provider plugin
 // version: 2.0.1
-// homepage: https://github.com/flutter/plugins/tree/master/packages/path_provider/path_provider_linux
+// homepage: https://github.com/flutter/plugins/tree/main/packages/path_provider/path_provider_linux
 
 flutter:
   plugin:
@@ -86,7 +86,7 @@ flutter:
         pluginClass: none
 
 environment:
-  sdk: '>=3.0.0-0 <4.0.0'
+  sdk: '>=3.2.0-0 <4.0.0'
   flutter: ">=1.20.0"
 ''';
 

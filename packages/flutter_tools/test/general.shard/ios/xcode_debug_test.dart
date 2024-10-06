@@ -56,10 +56,18 @@ void main() {
           scheme: 'Runner',
           xcodeProject: xcodeproj,
           xcodeWorkspace: xcworkspace,
+<<<<<<< HEAD
         );
       });
 
       testWithoutContext('succeeds in opening and debugging with launch options and verbose logging', () async {
+=======
+          hostAppProjectName: 'Runner',
+        );
+      });
+
+      testWithoutContext('succeeds in opening and debugging with launch options, expectedConfigurationBuildDir, and verbose logging', () async {
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         fakeProcessManager.addCommands(<FakeCommand>[
           FakeCommand(
             command: <String>[
@@ -88,6 +96,10 @@ void main() {
               pathToXcodeApp,
               '-g',
               '-j',
+<<<<<<< HEAD
+=======
+              '-F',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
               xcworkspace.path
             ],
           ),
@@ -105,6 +117,13 @@ void main() {
               project.xcodeProject.path,
               '--workspace-path',
               project.xcodeWorkspace.path,
+<<<<<<< HEAD
+=======
+              '--project-name',
+              project.hostAppProjectName,
+              '--expected-configuration-build-dir',
+              '/build/ios/iphoneos',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
               '--device-id',
               deviceId,
               '--scheme',
@@ -131,6 +150,11 @@ void main() {
           scheme: 'Runner',
           xcodeProject: xcodeproj,
           xcodeWorkspace: xcworkspace,
+<<<<<<< HEAD
+=======
+          hostAppProjectName: 'Runner',
+          expectedConfigurationBuildDir: '/build/ios/iphoneos',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
           verboseLogging: true,
         );
 
@@ -150,7 +174,11 @@ void main() {
         expect(status, true);
       });
 
+<<<<<<< HEAD
       testWithoutContext('succeeds in opening and debugging without launch options and verbose logging', () async {
+=======
+      testWithoutContext('succeeds in opening and debugging without launch options, expectedConfigurationBuildDir, and verbose logging', () async {
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         fakeProcessManager.addCommands(<FakeCommand>[
           FakeCommand(
             command: <String>[
@@ -178,6 +206,10 @@ void main() {
               pathToXcodeApp,
               '-g',
               '-j',
+<<<<<<< HEAD
+=======
+              '-F',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
               xcworkspace.path
             ],
           ),
@@ -195,6 +227,11 @@ void main() {
               project.xcodeProject.path,
               '--workspace-path',
               project.xcodeWorkspace.path,
+<<<<<<< HEAD
+=======
+              '--project-name',
+              project.hostAppProjectName,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
               '--device-id',
               deviceId,
               '--scheme',
@@ -257,18 +294,32 @@ void main() {
               pathToXcodeApp,
               '-g',
               '-j',
+<<<<<<< HEAD
+=======
+              '-F',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
               xcworkspace.path
             ],
             exception: ProcessException(
               'open',
               <String>[
                 '-a',
+<<<<<<< HEAD
                 '/non_existant_path',
                 '-g',
                 '-j',
                 xcworkspace.path,
               ],
               'The application /non_existant_path cannot be opened for an unexpected reason',
+=======
+                '/non_existent_path',
+                '-g',
+                '-j',
+                '-F',
+                xcworkspace.path,
+              ],
+              'The application /non_existent_path cannot be opened for an unexpected reason',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
             ),
           ),
         ]);
@@ -291,7 +342,11 @@ void main() {
 
         expect(
           logger.errorText,
+<<<<<<< HEAD
           contains('The application /non_existant_path cannot be opened for an unexpected reason'),
+=======
+          contains('The application /non_existent_path cannot be opened for an unexpected reason'),
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         );
         expect(fakeProcessManager, hasNoRemainingExpectations);
         expect(status, false);
@@ -332,6 +387,11 @@ void main() {
               project.xcodeProject.path,
               '--workspace-path',
               project.xcodeWorkspace.path,
+<<<<<<< HEAD
+=======
+              '--project-name',
+              project.hostAppProjectName,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
               '--device-id',
               deviceId,
               '--scheme',
@@ -401,6 +461,11 @@ void main() {
               project.xcodeProject.path,
               '--workspace-path',
               project.xcodeWorkspace.path,
+<<<<<<< HEAD
+=======
+              '--project-name',
+              project.hostAppProjectName,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
               '--device-id',
               deviceId,
               '--scheme',
@@ -474,6 +539,11 @@ void main() {
               project.xcodeProject.path,
               '--workspace-path',
               project.xcodeWorkspace.path,
+<<<<<<< HEAD
+=======
+              '--project-name',
+              project.hostAppProjectName,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
               '--device-id',
               deviceId,
               '--scheme',
@@ -547,6 +617,11 @@ void main() {
               project.xcodeProject.path,
               '--workspace-path',
               project.xcodeWorkspace.path,
+<<<<<<< HEAD
+=======
+              '--project-name',
+              project.hostAppProjectName,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
               '--device-id',
               deviceId,
               '--scheme',
@@ -674,6 +749,10 @@ void main() {
           scheme: 'Runner',
           xcodeProject: xcodeproj,
           xcodeWorkspace: xcworkspace,
+<<<<<<< HEAD
+=======
+          hostAppProjectName: 'Runner',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         );
         final XcodeDebug xcodeDebug = XcodeDebug(
           logger: logger,
@@ -731,6 +810,10 @@ void main() {
           scheme: 'Runner',
           xcodeProject: xcodeproj,
           xcodeWorkspace: xcworkspace,
+<<<<<<< HEAD
+=======
+          hostAppProjectName: 'Runner',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
           isTemporaryProject: true,
         );
 
@@ -784,7 +867,11 @@ void main() {
         expect(status, isTrue);
       });
 
+<<<<<<< HEAD
       testWithoutContext('prints error message when deleting temporary directory that is nonexistant', () async {
+=======
+      testWithoutContext('prints error message when deleting temporary directory that is nonexistent', () async {
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         final Xcode xcode = setupXcode(
           fakeProcessManager: fakeProcessManager,
           fileSystem: fileSystem,
@@ -794,6 +881,10 @@ void main() {
           scheme: 'Runner',
           xcodeProject: xcodeproj,
           xcodeWorkspace: xcworkspace,
+<<<<<<< HEAD
+=======
+          hostAppProjectName: 'Runner',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
           isTemporaryProject: true,
         );
         final XcodeDebug xcodeDebug = XcodeDebug(
@@ -857,6 +948,10 @@ void main() {
           scheme: 'Runner',
           xcodeProject: xcodeproj,
           xcodeWorkspace: xcworkspace,
+<<<<<<< HEAD
+=======
+          hostAppProjectName: 'Runner',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         );
         final XcodeDebug xcodeDebug = XcodeDebug(
           logger: logger,
@@ -889,7 +984,11 @@ void main() {
         expect(exitStatus, isTrue);
       });
 
+<<<<<<< HEAD
       testWithoutContext('does not crash when deleting temporary directory that is nonexistant when force exiting', () async {
+=======
+      testWithoutContext('does not crash when deleting temporary directory that is nonexistent when force exiting', () async {
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         final Xcode xcode = setupXcode(
           fakeProcessManager: FakeProcessManager.any(),
           fileSystem: fileSystem,
@@ -899,6 +998,10 @@ void main() {
           scheme: 'Runner',
           xcodeProject: xcodeproj,
           xcodeWorkspace: xcworkspace,
+<<<<<<< HEAD
+=======
+          hostAppProjectName: 'Runner',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
           isTemporaryProject: true,
         );
         final XcodeDebug xcodeDebug = XcodeDebug(
@@ -950,6 +1053,10 @@ void main() {
           scheme: 'Runner',
           xcodeProject: xcodeproj,
           xcodeWorkspace: xcworkspace,
+<<<<<<< HEAD
+=======
+          hostAppProjectName: 'Runner',
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
         );
       });
 
@@ -1037,6 +1144,99 @@ void main() {
         expect(status, isFalse);
       });
     });
+<<<<<<< HEAD
+=======
+
+    group('ensureXcodeDebuggerLaunchAction', () {
+      late Xcode xcode;
+
+      setUp(() {
+        xcode = setupXcode(
+          fakeProcessManager: fakeProcessManager,
+          fileSystem: fileSystem,
+          flutterRoot: flutterRoot,
+        );
+      });
+
+      testWithoutContext('succeeds', () async {
+        final XcodeDebug xcodeDebug = XcodeDebug(
+          logger: logger,
+          processManager: fakeProcessManager,
+          xcode: xcode,
+          fileSystem: fileSystem,
+        );
+
+        final File schemeFile = fileSystem.file('ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme');
+        schemeFile.createSync(recursive: true);
+        schemeFile.writeAsStringSync(validSchemeXml);
+
+        xcodeDebug.ensureXcodeDebuggerLaunchAction(schemeFile);
+        expect(logger.errorText, isEmpty);
+      });
+
+      testWithoutContext('prints error if scheme file not found', () async {
+        final XcodeDebug xcodeDebug = XcodeDebug(
+          logger: logger,
+          processManager: fakeProcessManager,
+          xcode: xcode,
+          fileSystem: fileSystem,
+        );
+
+        final File schemeFile = fileSystem.file('ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme');
+
+        xcodeDebug.ensureXcodeDebuggerLaunchAction(schemeFile);
+        expect(logger.errorText.contains('Failed to find'), isTrue);
+      });
+
+      testWithoutContext('throws error if launch action is missing debugger info', () async {
+        final XcodeDebug xcodeDebug = XcodeDebug(
+          logger: logger,
+          processManager: fakeProcessManager,
+          xcode: xcode,
+          fileSystem: fileSystem,
+        );
+
+        final File schemeFile = fileSystem.file('ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme');
+        schemeFile.createSync(recursive: true);
+        schemeFile.writeAsStringSync(disabledDebugExecutableSchemeXml);
+
+        expect(() => xcodeDebug.ensureXcodeDebuggerLaunchAction(schemeFile),
+            throwsToolExit(message: 'Your Xcode project is not setup to start a debugger.'));
+      });
+
+      testWithoutContext('prints error if unable to find launch action', () async {
+        final XcodeDebug xcodeDebug = XcodeDebug(
+          logger: logger,
+          processManager: fakeProcessManager,
+          xcode: xcode,
+          fileSystem: fileSystem,
+        );
+
+        final File schemeFile = fileSystem.file('ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme');
+        schemeFile.createSync(recursive: true);
+        schemeFile.writeAsStringSync('<?xml version="1.0" encoding="UTF-8"?><Scheme></Scheme>');
+
+        xcodeDebug.ensureXcodeDebuggerLaunchAction(schemeFile);
+        expect(logger.errorText.contains('Failed to find LaunchAction for the Scheme'), isTrue);
+      });
+
+      testWithoutContext('prints error if invalid xml', () async {
+        final XcodeDebug xcodeDebug = XcodeDebug(
+          logger: logger,
+          processManager: fakeProcessManager,
+          xcode: xcode,
+          fileSystem: fileSystem,
+        );
+
+        final File schemeFile = fileSystem.file('ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme');
+        schemeFile.createSync(recursive: true);
+        schemeFile.writeAsStringSync('<?xml version="1.0" encoding="UTF-8"?><Scheme>');
+
+        xcodeDebug.ensureXcodeDebuggerLaunchAction(schemeFile);
+        expect(logger.errorText.contains('Failed to parse'), isTrue);
+      });
+    });
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
   });
 
   group('Debug project through Xcode with app bundle', () {
@@ -1134,3 +1334,92 @@ class FakeProcess extends Fake implements Process {
     return true;
   }
 }
+<<<<<<< HEAD
+=======
+
+const String validSchemeXml = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "1510"
+   version = "1.3">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES">
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES">
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Profile"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>
+''';
+
+const String disabledDebugExecutableSchemeXml = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "1510"
+   version = "1.3">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES">
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES">
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = ""
+      selectedLauncherIdentifier = "Xcode.IDEFoundation.Launcher.PosixSpawn"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Profile"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>
+''';
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730

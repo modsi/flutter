@@ -2,17 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'package:flutter/material.dart';
+///
+/// @docImport 'slider.dart';
+/// @docImport 'switch.dart';
+library;
+
 import 'package:flutter/widgets.dart';
 
 import 'colors.dart';
 import 'constants.dart';
-import 'toggleable.dart';
 
 // Examples can assume:
 // bool _throwShotAway = false;
 // late StateSetter setState;
 
-// The relative values needed to transform a color to it's equivilant focus
+// The relative values needed to transform a color to it's equivalent focus
 // outline color.
 const double _kCupertinoFocusColorOpacity = 0.80;
 const double _kCupertinoFocusColorBrightness = 0.69;
@@ -57,8 +62,6 @@ class CupertinoCheckbox extends StatefulWidget {
   ///   can only be null if [tristate] is true.
   /// * [onChanged], which is called when the value of the checkbox should
   ///   change. It can be set to null to disable the checkbox.
-  ///
-  /// The values of [tristate] and [autofocus] must not be null.
   const CupertinoCheckbox({
     super.key,
     required this.value,
@@ -340,7 +343,7 @@ class _CheckboxPainter extends ToggleablePainter {
     final Path path = Path();
     // The ratios for the offsets below were found from looking at the checkbox
     // examples on in the HIG docs. The distance from the needed point to the
-    // edge was measured, then devided by the total width.
+    // edge was measured, then divided by the total width.
     const Offset start = Offset(CupertinoCheckbox.width * 0.25, CupertinoCheckbox.width * 0.52);
     const Offset mid = Offset(CupertinoCheckbox.width * 0.46, CupertinoCheckbox.width * 0.75);
     const Offset end = Offset(CupertinoCheckbox.width * 0.72, CupertinoCheckbox.width * 0.29);

@@ -6,8 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../rendering/mock_canvas.dart';
-
 void verify(WidgetTester tester, List<Offset> answerKey) {
   final List<Offset> testAnswers = tester.renderObjectList<RenderBox>(find.byType(SizedBox)).map<Offset>(
     (RenderBox target) => target.localToGlobal(Offset.zero),
@@ -953,5 +951,19 @@ void main() {
     // are placed to the left and right of it and the total width is the sum of
     // the individual widths.
     expect(tester.getSize(find.byType(IntrinsicWidth)).width, 5 * 16 + 60 + 3 * 16);
+  });
+
+  testWidgets('Wrap alignment flipped spaceInBetween', (WidgetTester tester) async {
+    await tester.pumpWidget(const Wrap(
+      textDirection: TextDirection.rtl,
+      alignment: WrapAlignment.spaceBetween,
+      children: <Widget>[
+        SizedBox(width: 100.0, height: 100.0),
+      ],
+    ));
+    expect(tester.renderObject<RenderBox>(find.byType(Wrap)).size, equals(const Size(800.0, 600.0)));
+    verify(tester, <Offset>[
+      const Offset(700.0, 0.0),
+    ]);
   });
 }

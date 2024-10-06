@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'package:flutter/material.dart';
+/// @docImport 'package:flutter/rendering.dart';
+library;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 
@@ -102,8 +106,6 @@ class MouseCursorManager {
 ///    will no longer be used in the future.
 abstract class MouseCursorSession {
   /// Create a session.
-  ///
-  /// All arguments must be non-null.
   MouseCursorSession(this.cursor, this.device);
 
   /// The cursor that created this session.
@@ -207,7 +209,7 @@ abstract class MouseCursor with Diagnosticable {
   /// to make debug information more readable. It is returned as the [toString]
   /// when the diagnostic level is at or above [DiagnosticLevel.info].
   ///
-  /// The [debugDescription] must not be null or empty string.
+  /// The [debugDescription] must not be empty.
   String get debugDescription;
 
   @override
@@ -280,12 +282,12 @@ class _NoopMouseCursorSession extends MouseCursorSession {
 
 /// A mouse cursor that doesn't change the cursor when activated.
 ///
-/// Although setting a region's cursor to [NoopMouseCursor] doesn't change the
+/// Although setting a region's cursor to [_NoopMouseCursor] doesn't change the
 /// cursor, it blocks regions behind it from changing the cursor, in contrast to
 /// setting the cursor to null. More information about the usage of this class
-/// can be found at [MouseCursors.uncontrolled].
+/// can be found at [MouseCursor.uncontrolled].
 ///
-/// To use this class, use [MouseCursors.uncontrolled]. Directly
+/// To use this class, use [MouseCursor.uncontrolled]. Directly
 /// instantiating this class is not allowed.
 class _NoopMouseCursor extends MouseCursor {
   // Application code shouldn't directly instantiate this class, since its only
@@ -401,11 +403,7 @@ class SystemMouseCursor extends MouseCursor {
 /// The cursors should be named based on the cursors' use cases instead of their
 /// appearance, because different platforms might (although not commonly) use
 /// different shapes for the same use case.
-class SystemMouseCursors {
-  // This class only contains static members, and should not be instantiated or
-  // extended.
-  SystemMouseCursors._();
-
+abstract final class SystemMouseCursors {
   // The mapping in this class must be kept in sync with the following files in
   // the engine:
   //

@@ -44,6 +44,13 @@ typedef ViewportBuilder = Widget Function(BuildContext context, ViewportOffset p
 /// which the scrollable content is displayed.
 typedef TwoDimensionalViewportBuilder = Widget Function(BuildContext context, ViewportOffset verticalPosition, ViewportOffset horizontalPosition);
 
+// The return type of _performEnsureVisible.
+//
+// The list of futures represents each pending ScrollPosition call to
+// ensureVisible. The returned ScrollableState's context is used to find the
+// next potential ancestor Scrollable.
+typedef _EnsureVisibleResults = (List<Future<void>>, ScrollableState);
+
 /// A widget that manages scrolling in one dimension and informs the [Viewport]
 /// through which the content is viewed.
 ///
@@ -72,6 +79,14 @@ typedef TwoDimensionalViewportBuilder = Widget Function(BuildContext context, Vi
 ///    [PageController], which creates a page-oriented scroll position subclass
 ///    that keeps the same page visible when the [Scrollable] resizes.
 ///
+/// ## Persisting the scroll position during a session
+///
+/// Scrollables attempt to persist their scroll position using [PageStorage].
+/// This can be disabled by setting [ScrollController.keepScrollOffset] to false
+/// on the [controller]. If it is enabled, using a [PageStorageKey] for the
+/// [key] of this widget (or one of its ancestors, e.g. a [ScrollView]) is
+/// recommended to help disambiguate different [Scrollable]s from each other.
+///
 /// See also:
 ///
 ///  * [ListView], which is a commonly used [ScrollView] that displays a
@@ -88,8 +103,6 @@ typedef TwoDimensionalViewportBuilder = Widget Function(BuildContext context, Vi
 ///    the scroll position without using a [ScrollController].
 class Scrollable extends StatefulWidget {
   /// Creates a widget that scrolls.
-  ///
-  /// The [axisDirection] and [viewportBuilder] arguments must not be null.
   const Scrollable({
     super.key,
     this.axisDirection = AxisDirection.down,
@@ -103,6 +116,7 @@ class Scrollable extends StatefulWidget {
     this.restorationId,
     this.scrollBehavior,
     this.clipBehavior = Clip.hardEdge,
+    this.hitTestBehavior = HitTestBehavior.opaque,
   }) : assert(semanticChildCount == null || semanticChildCount >= 0);
 
   /// {@template flutter.widgets.Scrollable.axisDirection}
@@ -211,6 +225,18 @@ class Scrollable extends StatefulWidget {
   ///  * [GestureDetector.excludeFromSemantics], which is used to accomplish the
   ///    exclusion.
   final bool excludeFromSemantics;
+
+  /// {@template flutter.widgets.scrollable.hitTestBehavior}
+  /// Defines the behavior of gesture detector used in this [Scrollable].
+  ///
+  /// This defaults to [HitTestBehavior.opaque] which means it prevents targets
+  /// behind this [Scrollable] from receiving events.
+  /// {@endtemplate}
+  ///
+  /// See also:
+  ///
+  ///  * [HitTestBehavior], for an explanation on different behaviors.
+  final HitTestBehavior hitTestBehavior;
 
   /// The number of children that will contribute semantic information.
   ///
@@ -435,6 +461,10 @@ class Scrollable extends StatefulWidget {
 
   /// Scrolls the scrollables that enclose the given context so as to make the
   /// given context visible.
+  ///
+  /// If the [Scrollable] of the provided [BuildContext] is a
+  /// [TwoDimensionalScrollable], both vertical and horizontal axes will ensure
+  /// the target is made visible.
   static Future<void> ensureVisible(
     BuildContext context, {
     double alignment = 0.0,
@@ -444,25 +474,28 @@ class Scrollable extends StatefulWidget {
   }) {
     final List<Future<void>> futures = <Future<void>>[];
 
-    // The `targetRenderObject` is used to record the first target renderObject.
-    // If there are multiple scrollable widgets nested, we should let
-    // the `targetRenderObject` as visible as possible to improve the user experience.
-    // Otherwise, let the outer renderObject as visible as possible maybe cause
-    // the `targetRenderObject` invisible.
+    // The targetRenderObject is used to record the first target renderObject.
+    // If there are multiple scrollable widgets nested, the targetRenderObject
+    // is made to be as visible as possible to improve the user experience. If
+    // the targetRenderObject is already visible, then let the outer
+    // renderObject be as visible as possible.
+    //
     // Also see https://github.com/flutter/flutter/issues/65100
     RenderObject? targetRenderObject;
     ScrollableState? scrollable = Scrollable.maybeOf(context);
     while (scrollable != null) {
-      futures.add(scrollable.position.ensureVisible(
+      final List<Future<void>> newFutures;
+      (newFutures, scrollable) = scrollable._performEnsureVisible(
         context.findRenderObject()!,
         alignment: alignment,
         duration: duration,
         curve: curve,
         alignmentPolicy: alignmentPolicy,
         targetRenderObject: targetRenderObject,
-      ));
+      );
+      futures.addAll(newFutures);
 
-      targetRenderObject = targetRenderObject ?? context.findRenderObject();
+      targetRenderObject ??= context.findRenderObject();
       context = scrollable.context;
       scrollable = Scrollable.maybeOf(context);
     }
@@ -528,16 +561,12 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
   /// Used by [EdgeDraggingAutoScroller] to progress the position forward when a
   /// drag gesture reaches the edge of the [Viewport].
   Offset get deltaToScrollOrigin {
-    switch (axisDirection) {
-      case AxisDirection.down:
-        return Offset(0, position.pixels);
-      case AxisDirection.up:
-        return Offset(0, -position.pixels);
-      case AxisDirection.left:
-        return Offset(-position.pixels, 0);
-      case AxisDirection.right:
-        return Offset(position.pixels, 0);
-    }
+    return switch (axisDirection) {
+      AxisDirection.up    => Offset(0, -position.pixels),
+      AxisDirection.down  => Offset(0, position.pixels),
+      AxisDirection.left  => Offset(-position.pixels, 0),
+      AxisDirection.right => Offset(position.pixels, 0),
+    };
   }
 
   ScrollController get _effectiveScrollController => widget.controller ?? _fallbackScrollController!;
@@ -624,6 +653,12 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
   }
 
   bool _shouldUpdatePosition(Scrollable oldWidget) {
+    if ((widget.scrollBehavior == null) != (oldWidget.scrollBehavior == null)) {
+      return true;
+    }
+    if (widget.scrollBehavior != null && oldWidget.scrollBehavior != null && widget.scrollBehavior!.shouldNotify(oldWidget.scrollBehavior!)) {
+      return true;
+    }
     ScrollPhysics? newPhysics = widget.physics ?? widget.scrollBehavior?.getScrollPhysics(context);
     ScrollPhysics? oldPhysics = oldWidget.physics ?? oldWidget.scrollBehavior?.getScrollPhysics(context);
     do {
@@ -645,7 +680,7 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
       if (oldWidget.controller == null) {
         // The old controller was null, meaning the fallback cannot be null.
         // Dispose of the fallback.
-        assert(_fallbackScrollController !=  null);
+        assert(_fallbackScrollController != null);
         assert(widget.controller != null);
         _fallbackScrollController!.detach(position);
         _fallbackScrollController!.dispose();
@@ -736,6 +771,7 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
                   ..maxFlingVelocity = _physics?.maxFlingVelocity
                   ..velocityTrackerBuilder = _configuration.velocityTrackerBuilder(context)
                   ..dragStartBehavior = widget.dragStartBehavior
+                  ..multitouchDragStrategy = _configuration.getMultitouchDragStrategy(context)
                   ..gestureSettings = _mediaQueryGestureSettings
                   ..supportedDevices = _configuration.dragDevices;
               },
@@ -757,6 +793,7 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
                   ..maxFlingVelocity = _physics?.maxFlingVelocity
                   ..velocityTrackerBuilder = _configuration.velocityTrackerBuilder(context)
                   ..dragStartBehavior = widget.dragStartBehavior
+                  ..multitouchDragStrategy = _configuration.getMultitouchDragStrategy(context)
                   ..gestureSettings = _mediaQueryGestureSettings
                   ..supportedDevices = _configuration.dragDevices;
               },
@@ -857,7 +894,6 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
   // direction, and any modifiers specified by the ScrollBehavior taken into
   // account.
   double _pointerSignalEventDelta(PointerScrollEvent event) {
-    late double delta;
     final Set<LogicalKeyboardKey> pressed = HardwareKeyboard.instance.logicalKeysPressed;
     final bool flipAxes = pressed.any(_configuration.pointerAxisModifiers.contains) &&
       // Axes are only flipped for physical mouse wheel input.
@@ -868,26 +904,21 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
       // axis.
       event.kind == PointerDeviceKind.mouse;
 
-    switch (widget.axis) {
-      case Axis.horizontal:
-        delta = flipAxes
-          ? event.scrollDelta.dy
-          : event.scrollDelta.dx;
-      case Axis.vertical:
-        delta = flipAxes
-          ? event.scrollDelta.dx
-          : event.scrollDelta.dy;
-    }
+    final Axis axis = flipAxes ? flipAxis(widget.axis) : widget.axis;
+    final double delta = switch (axis) {
+      Axis.horizontal => event.scrollDelta.dx,
+      Axis.vertical   => event.scrollDelta.dy,
+    };
 
-    if (axisDirectionIsReversed(widget.axisDirection)) {
-      delta *= -1;
-    }
-    return delta;
+    return axisDirectionIsReversed(widget.axisDirection) ? -delta : delta;
   }
 
   void _receivedPointerSignal(PointerSignalEvent event) {
     if (event is PointerScrollEvent && _position != null) {
       if (_physics != null && !_physics!.shouldAcceptUserOffset(position)) {
+        // The handler won't use the `event`, so allow the platform to trigger
+        // any default native actions.
+        event.respond(allowPlatformDefault: true);
         return;
       }
       final double delta = _pointerSignalEventDelta(event);
@@ -895,7 +926,11 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
       // Only express interest in the event if it would actually result in a scroll.
       if (delta != 0.0 && targetScrollOffset != position.pixels) {
         GestureBinding.instance.pointerSignalResolver.register(event, _handlePointerScroll);
+        return;
       }
+      // The `event` won't result in a scroll, so allow the platform to trigger
+      // any default native actions.
+      event.respond(allowPlatformDefault: true);
     } else if (event is PointerScrollInertiaCancelEvent) {
       position.pointerScroll(0);
       // Don't use the pointer signal resolver, all hit-tested scrollables should stop.
@@ -956,7 +991,7 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
         child: RawGestureDetector(
           key: _gestureDetectorKey,
           gestures: _gestureRecognizers,
-          behavior: HitTestBehavior.opaque,
+          behavior: widget.hitTestBehavior,
           excludeFromSemantics: widget.excludeFromSemantics,
           child: Semantics(
             explicitChildNodes: !widget.excludeFromSemantics,
@@ -997,6 +1032,28 @@ class ScrollableState extends State<Scrollable> with TickerProviderStateMixin, R
     }
 
     return result;
+  }
+
+  // Returns the Future from calling ensureVisible for the ScrollPosition, as
+  // as well as this ScrollableState instance so its context can be used to
+  // check for other ancestor Scrollables in executing ensureVisible.
+  _EnsureVisibleResults _performEnsureVisible(
+    RenderObject object, {
+    double alignment = 0.0,
+    Duration duration = Duration.zero,
+    Curve curve = Curves.ease,
+    ScrollPositionAlignmentPolicy alignmentPolicy = ScrollPositionAlignmentPolicy.explicit,
+    RenderObject? targetRenderObject,
+  }) {
+    final Future<void> ensureVisibleFuture = position.ensureVisible(
+      object,
+      alignment: alignment,
+      duration: duration,
+      curve: curve,
+      alignmentPolicy: alignmentPolicy,
+      targetRenderObject: targetRenderObject,
+    );
+    return (<Future<void>>[ ensureVisibleFuture ], this);
   }
 
   @override
@@ -1119,7 +1176,7 @@ class _ScrollableSelectionContainerDelegate extends MultiSelectableSelectionCont
       }
       _scheduledLayoutChange = false;
       layoutDidChange();
-    });
+    }, debugLabel: 'ScrollableSelectionContainer.layoutDidChange');
   }
 
   /// Stores the scroll offset when a scrollable receives the last
@@ -1169,11 +1226,11 @@ class _ScrollableSelectionContainerDelegate extends MultiSelectableSelectionCont
     if (event.type == SelectionEventType.endEdgeUpdate) {
       _currentDragEndRelatedToOrigin = _inferPositionRelatedToOrigin(event.globalPosition);
       final Offset endOffset = _currentDragEndRelatedToOrigin!.translate(-deltaToOrigin.dx, -deltaToOrigin.dy);
-      event = SelectionEdgeUpdateEvent.forEnd(globalPosition: endOffset);
+      event = SelectionEdgeUpdateEvent.forEnd(globalPosition: endOffset, granularity: event.granularity);
     } else {
       _currentDragStartRelatedToOrigin = _inferPositionRelatedToOrigin(event.globalPosition);
       final Offset startOffset = _currentDragStartRelatedToOrigin!.translate(-deltaToOrigin.dx, -deltaToOrigin.dy);
-      event = SelectionEdgeUpdateEvent.forStart(globalPosition: startOffset);
+      event = SelectionEdgeUpdateEvent.forStart(globalPosition: startOffset, granularity: event.granularity);
     }
     final SelectionResult result = super.handleSelectionEdgeUpdate(event);
 
@@ -1406,6 +1463,7 @@ class _ScrollableSelectionContainerDelegate extends MultiSelectableSelectionCont
         _selectableStartEdgeUpdateRecords.remove(selectable);
       case SelectionEventType.selectAll:
       case SelectionEventType.selectWord:
+      case SelectionEventType.selectParagraph:
         _selectableEndEdgeUpdateRecords[selectable] = state.position.pixels;
         _selectableStartEdgeUpdateRecords[selectable] = state.position.pixels;
     }
@@ -1422,6 +1480,9 @@ class _ScrollableSelectionContainerDelegate extends MultiSelectableSelectionCont
       final Offset deltaToOrigin = _getDeltaToScrollOrigin(state);
       final Offset startOffset = _currentDragStartRelatedToOrigin!.translate(-deltaToOrigin.dx, -deltaToOrigin.dy);
       selectable.dispatchSelectionEvent(SelectionEdgeUpdateEvent.forStart(globalPosition: startOffset));
+      // Make sure we track that we have synthesized a start event for this selectable,
+      // so we don't synthesize events unnecessarily.
+      _selectableStartEdgeUpdateRecords[selectable] = state.position.pixels;
     }
     final double? previousEndRecord = _selectableEndEdgeUpdateRecords[selectable];
     if (_currentDragEndRelatedToOrigin != null &&
@@ -1430,6 +1491,9 @@ class _ScrollableSelectionContainerDelegate extends MultiSelectableSelectionCont
       final Offset deltaToOrigin = _getDeltaToScrollOrigin(state);
       final Offset endOffset = _currentDragEndRelatedToOrigin!.translate(-deltaToOrigin.dx, -deltaToOrigin.dy);
       selectable.dispatchSelectionEvent(SelectionEdgeUpdateEvent.forEnd(globalPosition: endOffset));
+      // Make sure we track that we have synthesized an end event for this selectable,
+      // so we don't synthesize events unnecessarily.
+      _selectableEndEdgeUpdateRecords[selectable] = state.position.pixels;
     }
   }
 
@@ -1444,16 +1508,12 @@ class _ScrollableSelectionContainerDelegate extends MultiSelectableSelectionCont
 }
 
 Offset _getDeltaToScrollOrigin(ScrollableState scrollableState) {
-  switch (scrollableState.axisDirection) {
-    case AxisDirection.down:
-      return Offset(0, scrollableState.position.pixels);
-    case AxisDirection.up:
-      return Offset(0, -scrollableState.position.pixels);
-    case AxisDirection.left:
-      return Offset(-scrollableState.position.pixels, 0);
-    case AxisDirection.right:
-      return Offset(scrollableState.position.pixels, 0);
-  }
+  return switch (scrollableState.axisDirection) {
+    AxisDirection.up    => Offset(0, -scrollableState.position.pixels),
+    AxisDirection.down  => Offset(0, scrollableState.position.pixels),
+    AxisDirection.left  => Offset(-scrollableState.position.pixels, 0),
+    AxisDirection.right => Offset(scrollableState.position.pixels, 0),
+  };
 }
 
 /// With [_ScrollSemantics] certain child [SemanticsNode]s can be
@@ -1572,10 +1632,7 @@ class _RenderScrollSemantics extends RenderProxyBox {
       return;
     }
 
-    _innerNode ??= SemanticsNode(showOnScreen: showOnScreen);
-    _innerNode!
-      ..isMergedIntoParent = node.isPartOfNodeMerging
-      ..rect = node.rect;
+    (_innerNode ??= SemanticsNode(showOnScreen: showOnScreen)).rect = node.rect;
 
     int? firstVisibleIndex;
     final List<SemanticsNode> excluded = <SemanticsNode>[_innerNode!];
@@ -1695,6 +1752,7 @@ class TwoDimensionalScrollable extends StatefulWidget {
     this.excludeFromSemantics = false,
     this.diagonalDragBehavior = DiagonalDragBehavior.none,
     this.dragStartBehavior = DragStartBehavior.start,
+    this.hitTestBehavior = HitTestBehavior.opaque,
   });
 
   /// How scrolling gestures should lock to one axis, or allow free movement
@@ -1740,6 +1798,11 @@ class TwoDimensionalScrollable extends StatefulWidget {
   ///
   /// This value applies to both axes.
   final bool excludeFromSemantics;
+
+  /// {@macro flutter.widgets.scrollable.hitTestBehavior}
+  ///
+  /// This value applies to both axes.
+  final HitTestBehavior hitTestBehavior;
 
   /// {@macro flutter.widgets.scrollable.dragStartBehavior}
   ///
@@ -1901,7 +1964,7 @@ class TwoDimensionalScrollableState extends State<TwoDimensionalScrollable> {
       if (oldWidget.horizontalDetails.controller == null) {
         // The old controller was null, meaning the fallback cannot be null.
         // Dispose of the fallback.
-        assert(_horizontalFallbackController !=  null);
+        assert(_horizontalFallbackController != null);
         assert(widget.horizontalDetails.controller != null);
         _horizontalFallbackController!.dispose();
         _horizontalFallbackController = null;
@@ -1929,6 +1992,8 @@ class TwoDimensionalScrollableState extends State<TwoDimensionalScrollable> {
       restorationId: widget.restorationId,
       child: _VerticalOuterDimension(
         key: _verticalOuterScrollableKey,
+        // For gesture forwarding
+        horizontalKey: _horizontalInnerScrollableKey,
         axisDirection: widget.verticalDetails.direction,
         controller: widget.verticalDetails.controller
           ?? _verticalFallbackController!,
@@ -1941,9 +2006,11 @@ class TwoDimensionalScrollableState extends State<TwoDimensionalScrollable> {
         restorationId: 'OuterVerticalTwoDimensionalScrollable',
         dragStartBehavior: widget.dragStartBehavior,
         diagonalDragBehavior: widget.diagonalDragBehavior,
+        hitTestBehavior: widget.hitTestBehavior,
         viewportBuilder: (BuildContext context, ViewportOffset verticalOffset) {
           return _HorizontalInnerDimension(
             key: _horizontalInnerScrollableKey,
+            verticalOuterKey: _verticalOuterScrollableKey,
             axisDirection: widget.horizontalDetails.direction,
             controller: widget.horizontalDetails.controller
               ?? _horizontalFallbackController!,
@@ -1956,6 +2023,7 @@ class TwoDimensionalScrollableState extends State<TwoDimensionalScrollable> {
             restorationId: 'InnerHorizontalTwoDimensionalScrollable',
             dragStartBehavior: widget.dragStartBehavior,
             diagonalDragBehavior: widget.diagonalDragBehavior,
+            hitTestBehavior: widget.hitTestBehavior,
             viewportBuilder: (BuildContext context, ViewportOffset horizontalOffset) {
               return widget.viewportBuilder(context, verticalOffset, horizontalOffset);
             },
@@ -2001,6 +2069,7 @@ class _TwoDimensionalScrollableScope extends InheritedWidget {
 class _VerticalOuterDimension extends Scrollable {
   const _VerticalOuterDimension({
     super.key,
+    required this.horizontalKey,
     required super.viewportBuilder,
     required super.axisDirection,
     super.controller,
@@ -2010,10 +2079,12 @@ class _VerticalOuterDimension extends Scrollable {
     super.excludeFromSemantics,
     super.dragStartBehavior,
     super.restorationId,
+    super.hitTestBehavior,
     this.diagonalDragBehavior = DiagonalDragBehavior.none,
   }) : assert(axisDirection == AxisDirection.up || axisDirection == AxisDirection.down);
 
   final DiagonalDragBehavior diagonalDragBehavior;
+  final GlobalKey<ScrollableState> horizontalKey;
 
   @override
   _VerticalOuterDimensionState createState() => _VerticalOuterDimensionState();
@@ -2021,23 +2092,217 @@ class _VerticalOuterDimension extends Scrollable {
 
 class _VerticalOuterDimensionState extends ScrollableState {
   DiagonalDragBehavior get diagonalDragBehavior => (widget as _VerticalOuterDimension).diagonalDragBehavior;
+  ScrollableState get horizontalScrollable => (widget as _VerticalOuterDimension).horizontalKey.currentState!;
+
+  Axis? lockedAxis;
+  Offset? lastDragOffset;
+
+  // Implemented in the _HorizontalInnerDimension instead.
+  @override
+  _EnsureVisibleResults _performEnsureVisible(
+    RenderObject object, {
+    double alignment = 0.0,
+    Duration duration = Duration.zero,
+    Curve curve = Curves.ease,
+    ScrollPositionAlignmentPolicy alignmentPolicy = ScrollPositionAlignmentPolicy.explicit,
+    RenderObject? targetRenderObject,
+  }) {
+    assert(
+      false,
+      'The _performEnsureVisible method was called for the vertical scrollable '
+      'of a TwoDimensionalScrollable. This should not happen as the horizontal '
+      'scrollable handles both axes.'
+    );
+    return (<Future<void>>[], this);
+  }
+
+  void _evaluateLockedAxis(Offset offset) {
+    assert(lastDragOffset != null);
+    final Offset offsetDelta = lastDragOffset! - offset;
+    final double axisDifferential = offsetDelta.dx.abs() - offsetDelta.dy.abs();
+    if (axisDifferential.abs() >= kTouchSlop) {
+      // We have single axis winner.
+      lockedAxis = axisDifferential > 0.0 ? Axis.horizontal : Axis.vertical;
+    } else {
+      lockedAxis = null;
+    }
+  }
+
+  @override
+  void _handleDragDown(DragDownDetails details) {
+    switch (diagonalDragBehavior) {
+      case DiagonalDragBehavior.none:
+        break;
+      case DiagonalDragBehavior.weightedEvent:
+      case DiagonalDragBehavior.weightedContinuous:
+      case DiagonalDragBehavior.free:
+        // Initiate hold. If one or the other wins the gesture, cancel the
+        // opposite axis.
+        horizontalScrollable._handleDragDown(details);
+    }
+    super._handleDragDown(details);
+  }
+
+  @override
+  void _handleDragStart(DragStartDetails details) {
+    lastDragOffset = details.globalPosition;
+    switch (diagonalDragBehavior) {
+      case DiagonalDragBehavior.none:
+        break;
+      case DiagonalDragBehavior.free:
+        // Prepare to scroll both.
+        // vertical - will call super below after switch.
+        horizontalScrollable._handleDragStart(details);
+      case DiagonalDragBehavior.weightedEvent:
+      case DiagonalDragBehavior.weightedContinuous:
+        // See if one axis wins the drag.
+        _evaluateLockedAxis(details.globalPosition);
+        switch (lockedAxis) {
+          case null:
+            // Prepare to scroll both, null means no winner yet.
+            // vertical - will call super below after switch.
+            horizontalScrollable._handleDragStart(details);
+          case Axis.horizontal:
+            // Prepare to scroll horizontally.
+            horizontalScrollable._handleDragStart(details);
+            return;
+          case Axis.vertical:
+            // Prepare to scroll vertically - will call super below after switch.
+        }
+    }
+    super._handleDragStart(details);
+  }
+
+  @override
+  void _handleDragUpdate(DragUpdateDetails details) {
+    final DragUpdateDetails verticalDragDetails = DragUpdateDetails(
+      sourceTimeStamp: details.sourceTimeStamp,
+      delta: Offset(0.0, details.delta.dy),
+      primaryDelta: details.delta.dy,
+      globalPosition: details.globalPosition,
+      localPosition: details.localPosition,
+    );
+    final DragUpdateDetails horizontalDragDetails = DragUpdateDetails(
+      sourceTimeStamp: details.sourceTimeStamp,
+      delta: Offset(details.delta.dx, 0.0),
+      primaryDelta: details.delta.dx,
+      globalPosition: details.globalPosition,
+      localPosition: details.localPosition,
+    );
+
+    switch (diagonalDragBehavior) {
+      case DiagonalDragBehavior.none:
+        // Default gesture handling from super class.
+        super._handleDragUpdate(verticalDragDetails);
+        return;
+      case DiagonalDragBehavior.free:
+        // Scroll both axes
+        horizontalScrollable._handleDragUpdate(horizontalDragDetails);
+        super._handleDragUpdate(verticalDragDetails);
+        return;
+      case DiagonalDragBehavior.weightedContinuous:
+        // Re-evaluate locked axis for every update.
+        _evaluateLockedAxis(details.globalPosition);
+        lastDragOffset = details.globalPosition;
+      case DiagonalDragBehavior.weightedEvent:
+        // Lock axis only once per gesture.
+        if (lockedAxis == null && lastDragOffset != null) {
+          // A winner has not been declared yet.
+          // See if one axis has won the drag.
+          _evaluateLockedAxis(details.globalPosition);
+        }
+    }
+    switch (lockedAxis) {
+      case null:
+        // Scroll both - vertical after switch
+        horizontalScrollable._handleDragUpdate(horizontalDragDetails);
+      case Axis.horizontal:
+        // Scroll horizontally
+        horizontalScrollable._handleDragUpdate(horizontalDragDetails);
+        return;
+      case Axis.vertical:
+        // Scroll vertically - after switch
+    }
+    super._handleDragUpdate(verticalDragDetails);
+  }
+
+  @override
+  void _handleDragEnd(DragEndDetails details) {
+    lastDragOffset = null;
+    lockedAxis = null;
+    final double dx = details.velocity.pixelsPerSecond.dx;
+    final double dy = details.velocity.pixelsPerSecond.dy;
+    final DragEndDetails verticalDragDetails = DragEndDetails(
+      velocity: Velocity(pixelsPerSecond: Offset(0.0, dy)),
+      primaryVelocity: dy,
+    );
+    final DragEndDetails horizontalDragDetails = DragEndDetails(
+      velocity: Velocity(pixelsPerSecond: Offset(dx, 0.0)),
+      primaryVelocity: dx,
+    );
+
+    switch (diagonalDragBehavior) {
+      case DiagonalDragBehavior.none:
+        break;
+      case DiagonalDragBehavior.weightedEvent:
+      case DiagonalDragBehavior.weightedContinuous:
+      case DiagonalDragBehavior.free:
+        horizontalScrollable._handleDragEnd(horizontalDragDetails);
+    }
+    super._handleDragEnd(verticalDragDetails);
+  }
+
+  @override
+  void _handleDragCancel() {
+    lastDragOffset = null;
+    lockedAxis = null;
+    switch (diagonalDragBehavior) {
+      case DiagonalDragBehavior.none:
+        break;
+      case DiagonalDragBehavior.weightedEvent:
+      case DiagonalDragBehavior.weightedContinuous:
+      case DiagonalDragBehavior.free:
+        horizontalScrollable._handleDragCancel();
+    }
+    super._handleDragCancel();
+  }
 
   @override
   void setCanDrag(bool value) {
     switch (diagonalDragBehavior) {
       case DiagonalDragBehavior.none:
-        // If we aren't scrolling diagonally, the default drag gesture
-        // recognizer is used.
+        // If we aren't scrolling diagonally, the default drag gesture recognizer
+        // is used.
         super.setCanDrag(value);
         return;
       case DiagonalDragBehavior.weightedEvent:
       case DiagonalDragBehavior.weightedContinuous:
       case DiagonalDragBehavior.free:
         if (value) {
-          // If a type of diagonal scrolling is enabled, a panning gesture
-          // recognizer will be created for the _InnerDimension. So in this
-          // case, the _OuterDimension does not require a gesture recognizer.
-          _gestureRecognizers = const <Type, GestureRecognizerFactory>{};
+          // Replaces the typical vertical/horizontal drag gesture recognizers
+          // with a pan gesture recognizer to allow bidirectional scrolling.
+          // Based on the diagonalDragBehavior, valid vertical deltas are
+          // applied to this scrollable, while horizontal deltas are routed to
+          // the horizontal scrollable.
+          _gestureRecognizers = <Type, GestureRecognizerFactory>{
+            PanGestureRecognizer: GestureRecognizerFactoryWithHandlers<PanGestureRecognizer>(
+              () => PanGestureRecognizer(supportedDevices: _configuration.dragDevices),
+              (PanGestureRecognizer instance) {
+                instance
+                  ..onDown = _handleDragDown
+                  ..onStart = _handleDragStart
+                  ..onUpdate = _handleDragUpdate
+                  ..onEnd = _handleDragEnd
+                  ..onCancel = _handleDragCancel
+                  ..minFlingDistance = _physics?.minFlingDistance
+                  ..minFlingVelocity = _physics?.minFlingVelocity
+                  ..maxFlingVelocity = _physics?.maxFlingVelocity
+                  ..velocityTrackerBuilder = _configuration.velocityTrackerBuilder(context)
+                  ..dragStartBehavior = widget.dragStartBehavior
+                  ..gestureSettings = _mediaQueryGestureSettings;
+              },
+            ),
+          };
           // Cancel the active hold/drag (if any) because the gesture recognizers
           // will soon be disposed by our RawGestureDetector, and we won't be
           // receiving pointer up events to cancel the hold/drag.
@@ -2069,6 +2334,7 @@ class _VerticalOuterDimensionState extends ScrollableState {
 class _HorizontalInnerDimension extends Scrollable {
   const _HorizontalInnerDimension({
     super.key,
+    required this.verticalOuterKey,
     required super.viewportBuilder,
     required super.axisDirection,
     super.controller,
@@ -2078,9 +2344,11 @@ class _HorizontalInnerDimension extends Scrollable {
     super.excludeFromSemantics,
     super.dragStartBehavior,
     super.restorationId,
+    super.hitTestBehavior,
     this.diagonalDragBehavior = DiagonalDragBehavior.none,
   }) : assert(axisDirection == AxisDirection.left || axisDirection == AxisDirection.right);
 
+  final GlobalKey<ScrollableState> verticalOuterKey;
   final DiagonalDragBehavior diagonalDragBehavior;
 
   @override
@@ -2089,9 +2357,8 @@ class _HorizontalInnerDimension extends Scrollable {
 
 class _HorizontalInnerDimensionState extends ScrollableState {
   late ScrollableState verticalScrollable;
-  Axis? lockedAxis;
-  Offset? lastDragOffset;
 
+  GlobalKey<ScrollableState> get verticalOuterKey => (widget as _HorizontalInnerDimension).verticalOuterKey;
   DiagonalDragBehavior get diagonalDragBehavior => (widget as _HorizontalInnerDimension).diagonalDragBehavior;
 
   @override
@@ -2101,193 +2368,57 @@ class _HorizontalInnerDimensionState extends ScrollableState {
     super.didChangeDependencies();
   }
 
-  void _evaluateLockedAxis(Offset offset) {
-    assert(lastDragOffset != null);
-    final Offset offsetDelta = lastDragOffset! - offset;
-    final double axisDifferential = offsetDelta.dx.abs() - offsetDelta.dy.abs();
-    if (axisDifferential.abs() >= kTouchSlop) {
-      // We have single axis winner.
-      lockedAxis = axisDifferential > 0.0 ? Axis.horizontal : Axis.vertical;
-    } else {
-      lockedAxis = null;
-    }
-  }
-
+  // Returns the Future from calling ensureVisible for the ScrollPosition, as
+  // as well as the vertical ScrollableState instance so its context can be
+  // used to check for other ancestor Scrollables in executing ensureVisible.
   @override
-  void _handleDragDown(DragDownDetails details) {
-    switch (diagonalDragBehavior) {
-      case DiagonalDragBehavior.none:
-        break;
-      case DiagonalDragBehavior.weightedEvent:
-      case DiagonalDragBehavior.weightedContinuous:
-      case DiagonalDragBehavior.free:
-        // Initiate hold. If one or the other wins the gesture, cancel the
-        // opposite axis.
-        verticalScrollable._handleDragDown(details);
-    }
-    super._handleDragDown(details);
-  }
+  _EnsureVisibleResults _performEnsureVisible(
+    RenderObject object, {
+    double alignment = 0.0,
+    Duration duration = Duration.zero,
+    Curve curve = Curves.ease,
+    ScrollPositionAlignmentPolicy alignmentPolicy = ScrollPositionAlignmentPolicy.explicit,
+    RenderObject? targetRenderObject,
+  }) {
+    final List<Future<void>> newFutures = <Future<void>>[
+      position.ensureVisible(
+        object,
+        alignment: alignment,
+        duration: duration,
+        curve: curve,
+        alignmentPolicy: alignmentPolicy,
+      ),
+      verticalScrollable.position.ensureVisible(
+        object,
+        alignment: alignment,
+        duration: duration,
+        curve: curve,
+        alignmentPolicy: alignmentPolicy,
+      ),
+    ];
 
-  @override
-  void _handleDragStart(DragStartDetails details) {
-    lastDragOffset = details.globalPosition;
-    switch (diagonalDragBehavior) {
-      case DiagonalDragBehavior.none:
-        break;
-      case DiagonalDragBehavior.weightedEvent:
-      case DiagonalDragBehavior.weightedContinuous:
-        // See if one axis wins the drag.
-        _evaluateLockedAxis(details.globalPosition);
-        switch (lockedAxis) {
-          case null:
-            // Prepare to scroll diagonally
-            verticalScrollable._handleDragStart(details);
-          case Axis.horizontal:
-            // Prepare to scroll horizontally.
-            super._handleDragStart(details);
-            return;
-          case Axis.vertical:
-            // Prepare to scroll vertically.
-            verticalScrollable._handleDragStart(details);
-            return;
-        }
-      case DiagonalDragBehavior.free:
-        verticalScrollable._handleDragStart(details);
-    }
-    super._handleDragStart(details);
-  }
-
-  @override
-  void _handleDragUpdate(DragUpdateDetails details) {
-    final DragUpdateDetails verticalDragDetails = DragUpdateDetails(
-      sourceTimeStamp: details.sourceTimeStamp,
-      delta: Offset(0.0, details.delta.dy),
-      primaryDelta: details.delta.dy,
-      globalPosition: details.globalPosition,
-      localPosition: details.localPosition,
-    );
-
-    final DragUpdateDetails horizontalDragDetails = DragUpdateDetails(
-      sourceTimeStamp: details.sourceTimeStamp,
-      delta: Offset(details.delta.dx, 0.0),
-      primaryDelta: details.delta.dx,
-      globalPosition: details.globalPosition,
-      localPosition: details.localPosition,
-    );
-    switch (diagonalDragBehavior) {
-      case DiagonalDragBehavior.none:
-        // Default gesture handling from super class.
-        super._handleDragUpdate(horizontalDragDetails);
-        return;
-      case DiagonalDragBehavior.free:
-        // Scroll both axes
-        verticalScrollable._handleDragUpdate(verticalDragDetails);
-        super._handleDragUpdate(horizontalDragDetails);
-        return;
-      case DiagonalDragBehavior.weightedContinuous:
-        // Re-evaluate locked axis for every update.
-        _evaluateLockedAxis(details.globalPosition);
-        lastDragOffset = details.globalPosition;
-      case DiagonalDragBehavior.weightedEvent:
-        // Lock axis only once per gesture.
-        if (lockedAxis == null && lastDragOffset != null) {
-          // A winner has not been declared yet.
-          // See if one axis has won the drag.
-          _evaluateLockedAxis(details.globalPosition);
-        }
-    }
-    switch (lockedAxis) {
-      case null:
-        // Scroll diagonally
-        verticalScrollable._handleDragUpdate(verticalDragDetails);
-        super._handleDragUpdate(horizontalDragDetails);
-      case Axis.horizontal:
-        // Scroll horizontally
-        super._handleDragUpdate(horizontalDragDetails);
-        return;
-      case Axis.vertical:
-        // Scroll vertically
-        verticalScrollable._handleDragUpdate(verticalDragDetails);
-        return;
-    }
-  }
-
-  @override
-  void _handleDragEnd(DragEndDetails details) {
-    lastDragOffset = null;
-    lockedAxis = null;
-    final double dx = details.velocity.pixelsPerSecond.dx;
-    final double dy = details.velocity.pixelsPerSecond.dy;
-    final DragEndDetails verticalDragDetails = DragEndDetails(
-      velocity: Velocity(pixelsPerSecond: Offset(0.0, dy)),
-      primaryVelocity: details.velocity.pixelsPerSecond.dy,
-    );
-    final DragEndDetails horizontalDragDetails = DragEndDetails(
-      velocity: Velocity(pixelsPerSecond: Offset(dx, 0.0)),
-      primaryVelocity: details.velocity.pixelsPerSecond.dx,
-    );
-    switch (diagonalDragBehavior) {
-      case DiagonalDragBehavior.none:
-        break;
-      case DiagonalDragBehavior.weightedEvent:
-      case DiagonalDragBehavior.weightedContinuous:
-      case DiagonalDragBehavior.free:
-        verticalScrollable._handleDragEnd(verticalDragDetails);
-    }
-    super._handleDragEnd(horizontalDragDetails);
-  }
-
-  @override
-  void _handleDragCancel() {
-    lastDragOffset = null;
-    lockedAxis = null;
-    switch (diagonalDragBehavior) {
-      case DiagonalDragBehavior.none:
-        break;
-      case DiagonalDragBehavior.weightedEvent:
-      case DiagonalDragBehavior.weightedContinuous:
-      case DiagonalDragBehavior.free:
-        verticalScrollable._handleDragCancel();
-    }
-    super._handleDragCancel();
+    return (newFutures, verticalScrollable);
   }
 
   @override
   void setCanDrag(bool value) {
     switch (diagonalDragBehavior) {
       case DiagonalDragBehavior.none:
-        // If we aren't scrolling diagonally, the default drag gesture recognizer
-        // is used.
+        // If we aren't scrolling diagonally, the default drag gesture
+        // recognizer is used.
         super.setCanDrag(value);
         return;
       case DiagonalDragBehavior.weightedEvent:
       case DiagonalDragBehavior.weightedContinuous:
       case DiagonalDragBehavior.free:
         if (value) {
-          // Replaces the typical vertical/horizontal drag gesture recognizers
-          // with a pan gesture recognizer to allow bidirectional scrolling.
-          // Based on the diagonalDragBehavior, valid horizontal deltas are
-          // applied to this scrollable, while vertical deltas are routed to
-          // the vertical scrollable.
-          _gestureRecognizers = <Type, GestureRecognizerFactory>{
-            PanGestureRecognizer: GestureRecognizerFactoryWithHandlers<PanGestureRecognizer>(
-              () => PanGestureRecognizer(supportedDevices: _configuration.dragDevices),
-              (PanGestureRecognizer instance) {
-                instance
-                  ..onDown = _handleDragDown
-                  ..onStart = _handleDragStart
-                  ..onUpdate = _handleDragUpdate
-                  ..onEnd = _handleDragEnd
-                  ..onCancel = _handleDragCancel
-                  ..minFlingDistance = _physics?.minFlingDistance
-                  ..minFlingVelocity = _physics?.minFlingVelocity
-                  ..maxFlingVelocity = _physics?.maxFlingVelocity
-                  ..velocityTrackerBuilder = _configuration.velocityTrackerBuilder(context)
-                  ..dragStartBehavior = widget.dragStartBehavior
-                  ..gestureSettings = _mediaQueryGestureSettings;
-              },
-            ),
-          };
+          // If a type of diagonal scrolling is enabled, a panning gesture
+          // recognizer will be created for the _VerticalOuterDimension. So in
+          // this case, the _HorizontalInnerDimension does not require a gesture
+          // recognizer, meanwhile we should ensure the outer dimension has
+          // updated in case it did not have enough content to enable dragging.
+          _gestureRecognizers = const <Type, GestureRecognizerFactory>{};
+          verticalOuterKey.currentState!.setCanDrag(value);
           // Cancel the active hold/drag (if any) because the gesture recognizers
           // will soon be disposed by our RawGestureDetector, and we won't be
           // receiving pointer up events to cancel the hold/drag.

@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'package:flutter/material.dart';
+library;
+
 import 'dart:math' as math;
 
 import 'basic_types.dart';
@@ -129,8 +132,6 @@ class CircularNotchedRectangle extends NotchedShape {
 /// for a [FloatingActionButton]).
 class AutomaticNotchedShape extends NotchedShape {
   /// Creates a [NotchedShape] that is defined by two [ShapeBorder]s.
-  ///
-  /// The [host] must not be null.
   ///
   /// The [guest] may be null, in which case no notch is created even
   /// if a guest rectangle is provided to [getOuterPath].

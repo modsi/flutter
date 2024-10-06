@@ -4,6 +4,7 @@
 
 import 'package:flutter_tools/src/base/logger.dart';
 import 'package:flutter_tools/src/base/process.dart';
+import 'package:flutter_tools/src/base/version.dart';
 import 'package:flutter_tools/src/ios/xcodeproj.dart';
 import 'package:flutter_tools/src/ios/xcresult.dart';
 import 'package:flutter_tools/src/macos/xcode.dart';
@@ -21,12 +22,15 @@ void main() {
     required Xcode xcode,
     int exitCode = 0,
     String stderr = '',
+    bool useLegacyFlag = true,
   }) {
     return FakeCommand(
       command: <String>[
         ...xcode.xcrunCommand(),
         'xcresulttool',
         'get',
+        if (useLegacyFlag)
+          '--legacy',
         '--path',
         tempResultPath,
         '--format',
@@ -35,7 +39,7 @@ void main() {
       stdout: stdout,
       stderr: stderr,
       exitCode: exitCode,
-      onRun: () {},
+      onRun: (_) {},
     );
   }
 
@@ -58,6 +62,8 @@ void main() {
     required String resultJson,
     int exitCode = 0,
     String stderr = '',
+    Version? xcodeVersion = const Version.withText(16, 0, 0, '16.0'),
+    bool useLegacyFlag = true,
   }) {
     final FakeProcessManager fakeProcessManager =
         FakeProcessManager.list(<FakeCommand>[
@@ -68,7 +74,7 @@ void main() {
       processManager: fakeProcessManager,
       xcodeProjectInterpreter: XcodeProjectInterpreter.test(
         processManager: fakeProcessManager,
-        version: null,
+        version: xcodeVersion,
       ),
     );
     fakeProcessManager.addCommands(
@@ -79,6 +85,7 @@ void main() {
           xcode: xcode,
           exitCode: exitCode,
           stderr: stderr,
+          useLegacyFlag: useLegacyFlag
         ),
       ],
     );
@@ -218,6 +225,22 @@ void main() {
   });
 
   testWithoutContext(
+<<<<<<< HEAD
+=======
+      'correctly parse sample result on < Xcode 16.', () async {
+    final XCResultGenerator generator = setupGenerator(
+      resultJson: kSampleResultJsonNoIssues,
+      xcodeVersion: Version(15, 0, 0),
+      useLegacyFlag: false,
+    );
+    final XCResult result = await generator.generate();
+    expect(result.issues.length, 0);
+    expect(result.parseSuccess, isTrue);
+    expect(result.parsingErrorMessage, isNull);
+  });
+
+  testWithoutContext(
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
       'error: `xcresulttool get` process fail should return an `XCResult` with stderr as `parsingErrorMessage`.',
       () async {
     const String fakeStderr = 'Fake: fail to parse result json.';

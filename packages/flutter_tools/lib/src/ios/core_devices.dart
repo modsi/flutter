@@ -5,6 +5,10 @@
 import 'package:meta/meta.dart';
 import 'package:process/process.dart';
 
+<<<<<<< HEAD
+=======
+import '../base/error_handling_io.dart';
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
 import '../base/file_system.dart';
 import '../base/io.dart';
 import '../base/logger.dart';
@@ -77,8 +81,21 @@ class IOSCoreDeviceControl {
     ];
 
     try {
+<<<<<<< HEAD
       await _processUtils.run(command, throwOnError: true);
 
+=======
+      final RunResult result = await _processUtils.run(command, throwOnError: true);
+
+      if (!output.existsSync()) {
+        _logger.printError('After running the command ${command.join(' ')} the file');
+        _logger.printError('${output.path} was expected to exist, but it did not.');
+        _logger.printError('The process exited with code ${result.exitCode} and');
+        _logger.printError('Stdout:\n\n${result.stdout.trim()}\n');
+        _logger.printError('Stderr:\n\n${result.stderr.trim()}');
+        throw StateError('Expected the file ${output.path} to exist but it did not');
+      }
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
       final String stringOutput = output.readAsStringSync();
       _logger.printTrace(stringOutput);
 
@@ -101,13 +118,18 @@ class IOSCoreDeviceControl {
       _logger.printError('Error executing devicectl: $err');
       return <Object?>[];
     } finally {
+<<<<<<< HEAD
       tempDirectory.deleteSync(recursive: true);
+=======
+      ErrorHandlingFileSystem.deleteIfExists(tempDirectory, recursive: true);
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
     }
   }
 
   Future<List<IOSCoreDevice>> getCoreDevices({
     Duration timeout = const Duration(seconds: _minimumTimeoutInSeconds),
   }) async {
+<<<<<<< HEAD
     final List<IOSCoreDevice> devices = <IOSCoreDevice>[];
 
     final List<Object?> devicesSection = await _listCoreDevices(timeout: timeout);
@@ -117,6 +139,14 @@ class IOSCoreDeviceControl {
       }
     }
     return devices;
+=======
+    final List<Object?> devicesSection = await _listCoreDevices(timeout: timeout);
+    return <IOSCoreDevice>[
+      for (final Object? deviceObject in devicesSection)
+        if (deviceObject is Map<String, Object?>)
+          IOSCoreDevice.fromBetaJson(deviceObject, logger: _logger),
+    ];
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
   }
 
   /// Executes `devicectl` command to get list of apps installed on the device.
@@ -183,6 +213,7 @@ class IOSCoreDeviceControl {
     required String deviceId,
     String? bundleId,
   }) async {
+<<<<<<< HEAD
     final List<IOSCoreDeviceInstalledApp> apps = <IOSCoreDeviceInstalledApp>[];
 
     final List<Object?> appsData = await _listInstalledApps(deviceId: deviceId, bundleId: bundleId);
@@ -192,6 +223,14 @@ class IOSCoreDeviceControl {
       }
     }
     return apps;
+=======
+    final List<Object?> appsData = await _listInstalledApps(deviceId: deviceId, bundleId: bundleId);
+    return <IOSCoreDeviceInstalledApp>[
+      for (final Object? appObject in appsData)
+        if (appObject is Map<String, Object?>)
+          IOSCoreDeviceInstalledApp.fromBetaJson(appObject),
+    ];
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
   }
 
   Future<bool> isAppInstalled({
@@ -369,7 +408,11 @@ class IOSCoreDevice {
     required this.connectionProperties,
     required this.deviceProperties,
     required this.hardwareProperties,
+<<<<<<< HEAD
     required this.coreDeviceIdentifer,
+=======
+    required this.coreDeviceIdentifier,
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
     required this.visibilityClass,
   });
 
@@ -392,6 +435,7 @@ class IOSCoreDevice {
     Map<String, Object?> data, {
     required Logger logger,
   }) {
+<<<<<<< HEAD
     final List<_IOSCoreDeviceCapability> capabilitiesList = <_IOSCoreDeviceCapability>[];
     if (data['capabilities'] is List<Object?>) {
       final List<Object?> capabilitiesData = data['capabilities']! as List<Object?>;
@@ -401,6 +445,14 @@ class IOSCoreDevice {
         }
       }
     }
+=======
+    final List<_IOSCoreDeviceCapability> capabilitiesList = <_IOSCoreDeviceCapability>[
+      if (data['capabilities'] case final List<Object?> capabilitiesData)
+        for (final Object? capabilityData in capabilitiesData)
+          if (capabilityData != null && capabilityData is Map<String, Object?>)
+            _IOSCoreDeviceCapability.fromBetaJson(capabilityData),
+    ];
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
 
     _IOSCoreDeviceConnectionProperties? connectionProperties;
     if (data['connectionProperties'] is Map<String, Object?>) {
@@ -431,7 +483,11 @@ class IOSCoreDevice {
       connectionProperties: connectionProperties,
       deviceProperties: deviceProperties,
       hardwareProperties: hardwareProperties,
+<<<<<<< HEAD
       coreDeviceIdentifer: data['identifier']?.toString(),
+=======
+      coreDeviceIdentifier: data['identifier']?.toString(),
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
       visibilityClass: data['visibilityClass']?.toString(),
     );
   }
@@ -439,6 +495,7 @@ class IOSCoreDevice {
   String? get udid => hardwareProperties?.udid;
 
   DeviceConnectionInterface? get connectionInterface {
+<<<<<<< HEAD
     final String? transportType = connectionProperties?.transportType;
     if (transportType != null) {
       if (transportType.toLowerCase() == 'localnetwork') {
@@ -448,6 +505,13 @@ class IOSCoreDevice {
       }
     }
     return null;
+=======
+    return switch (connectionProperties?.transportType?.toLowerCase()) {
+      'localnetwork' => DeviceConnectionInterface.wireless,
+      'wired'        => DeviceConnectionInterface.attached,
+      _ => null,
+    };
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
   }
 
   @visibleForTesting
@@ -461,7 +525,11 @@ class IOSCoreDevice {
   @visibleForTesting
   final _IOSCoreDeviceHardwareProperties? hardwareProperties;
 
+<<<<<<< HEAD
   final String? coreDeviceIdentifer;
+=======
+  final String? coreDeviceIdentifier;
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
   final String? visibilityClass;
 }
 
@@ -704,6 +772,7 @@ class _IOSCoreDeviceHardwareProperties {
     required Logger logger,
   }) {
     _IOSCoreDeviceCPUType? cpuType;
+<<<<<<< HEAD
     if (data['cpuType'] is Map<String, Object?>) {
       cpuType = _IOSCoreDeviceCPUType.fromBetaJson(data['cpuType']! as Map<String, Object?>);
     }
@@ -718,6 +787,19 @@ class _IOSCoreDeviceHardwareProperties {
         }
       }
       supportedCPUTypes = cpuTypes;
+=======
+    if (data['cpuType'] case final Map<String, Object?> betaJson) {
+      cpuType = _IOSCoreDeviceCPUType.fromBetaJson(betaJson);
+    }
+
+    List<_IOSCoreDeviceCPUType>? supportedCPUTypes;
+    if (data['supportedCPUTypes'] case final List<Object?> values) {
+      supportedCPUTypes = <_IOSCoreDeviceCPUType>[
+        for (final Object? cpuTypeData in values)
+          if (cpuTypeData is Map<String, Object?>)
+            _IOSCoreDeviceCPUType.fromBetaJson(cpuTypeData),
+      ];
+>>>>>>> 2663184aa79047d0a33a14a3b607954f8fdd8730
     }
 
     List<int>? supportedDeviceFamilies;
